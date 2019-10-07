@@ -124,8 +124,8 @@ char filecalibration[11] = "/coeff.txt";    // fichier en SPIFFS contenant les d
 char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le log
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V0-0.0";
-int    Magique    = 0002;
+String ver        = "V0-0.1";
+int    Magique    = 0003;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -286,7 +286,7 @@ void setup() {
       config.Pos_Pn_PB[i] = 0;
     }
     // config.Pos_Pn_PB[1]  = 1;	// le premier numero du PB par defaut
-    String temp          = "TPCF_CDS1";// TPCF_TCnls
+    String temp          = "TPCF_CV65";
     temp.toCharArray(config.Idchar, 11);
     EEPROM.put(confign, config);
     EEPROM.commit();
@@ -378,8 +378,7 @@ void loop() {
       *bufPtr = Serial2.read();
       bufferrcpt += *bufPtr;
       Serial.write(*bufPtr);
-      // Alarm.delay(1);
-      delay(1);
+      delay(1);// Alarm.delay(1);
     } while ((*bufPtr++ != '\n') && (Serial2.available()) && (++charCount < (sizeof(SIM800InBuffer) - 1)));
     /* Add a terminal NULL to the notification string */
     *bufPtr = 0;
@@ -397,10 +396,10 @@ void loop() {
     }
   }
 
-  if (IRQ_Cpt_Bp > 0) {
+  if (IRQ_Cpt_Bp > 0 && config.Bp) {
     Serial.print(F("Interruption : "));
     Serial.println(IRQ_Cpt_Bp);
-    Feux = 3; // Blanc Cli1
+    Feux = 3; // Violet 0, Blanc Manoeuvre Cli lent
     Allumage();
     if (!FlagBp) {
       FlagBp = true;
@@ -427,15 +426,6 @@ void Acquisition() {
     firstdecision = true;
   }
   cpt ++;
-
-  // if (LastWupAlarme != WupAlarme && nsms == 0) { // fin de la tempo analyse retour sleep
-  // LastWupAlarme = false;
-  // WupAlarme     = false;
-  // Serial.println(F("Fin TempoAnalyse"));
-  // envoieGroupeSMS(0, 1);				// envoie groupé Etat avec fin analyse
-  // calculTimeSleep();
-  // DebutSleep();
-  // }
 
   if (CoeffTension[0] == 0 || CoeffTension[1] == 0 || CoeffTension[2] == 0 || CoeffTension[3] == 0) {
     OuvrirFichierCalibration(); // patch relecture des coeff perdu
@@ -557,7 +547,7 @@ void GestionFeux(int mode) {
       FastRate.detach();
       break;
     case 3: // Violet 0, Blanc Cli1
-      Serial.println("Feux Clignotant lent");
+      Serial.println("Feux Blc Clignotant lent");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
       FastBlink.detach();
@@ -565,7 +555,7 @@ void GestionFeux(int mode) {
       SlowBlink.attach_ms(config.SlowBlinker, blink);
       break;
     case 4: // Violet 0, Blanc Cli2
-      Serial.println("Feux Clignotant rapide");
+      Serial.println("Feux Blc Clignotant rapide");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
       SlowBlink.detach();
@@ -671,12 +661,12 @@ void traite_sms(byte slot) {
       // textesms.trim();
     }
     textesms.replace(" ", "");// supp tous les espaces
-    if (textesms.indexOf("A") == 0 || textesms.indexOf("D") == 0) {
-      String temp = Id.substring(6, 10);
-      temp.toUpperCase();
-      if (textesms.indexOf("A" + temp) == 0) textesms = F("INTRUON");
-      if (textesms.indexOf("D" + temp) == 0) textesms = F("INTRUOFF");
-    }
+    // if (textesms.indexOf("A") == 0 || textesms.indexOf("D") == 0) {
+    // Serial.println(Id.substring(5, 9));
+    // temp.toUpperCase();
+    // if (textesms.indexOf("A" + temp) == 0) textesms = F("INTRUON");
+    // if (textesms.indexOf("D" + temp) == 0) textesms = F("INTRUOFF");
+    // }
     Serial.print(F("textesms  = ")), Serial.println(textesms);
 
     if ((sms && nom.length() > 0) || !sms) {        // si nom appelant existant dans phone book
@@ -858,62 +848,6 @@ fin_i:
         //Serial.println( message);
         EnvoyerSms(number, sms);
       }
-      /* else if (textesms.indexOf(F("INTRUON")) == 0) {	//	Armement Alarme
-        // conserver INTRUON en depannage si ID non conforme
-        if (!config.Intru) {
-          config.Intru = !config.Intru;
-          sauvConfig();											// sauvegarde en EEPROM
-          ActiveInterrupt();
-          if (!sms) {
-            nom = F("console");
-          }
-          logRecord(nom, "A"); // renseigne le log
-          MajLog(nom, "A");
-        }
-        generationMessage(0);
-        EnvoyerSms(number, sms);
-        } */
-      /* else if (textesms.indexOf(F("INTRUOFF")) == 0) { //	Desarmement
-        if (config.Intru) {
-          config.Intru = !config.Intru;
-          sauvConfig();														// sauvegarde en EEPROM
-          DesActiveInterrupt(); */
-      /*	Arret Sonnerie au cas ou? sans envoyer SMS */
-      /* digitalWrite(PinSirene, LOW);	// Arret Sonnerie
-        Alarm.disable(TSonn);			// on arrete la tempo sonnerie
-        Alarm.disable(TSonnMax);	// on arrete la tempo sonnerie maxi
-        FirstSonn = false;
-        FlagAlarmeIntrusion = false;
-        FlagAlarmeCable1 = false;
-        FlagAlarmeCable2 = false;
-        FlagAlarmeCoffret = false;
-        FlagPIR = false;
-        if (!sms) {
-        nom = F("console");
-        }
-        logRecord(nom, "D");				// renseigne le log
-        MajLog(nom, "D");
-        }
-        generationMessage(0);
-        EnvoyerSms(number, sms);
-        } */
-      /* else if (textesms.indexOf(F("SILENCE")) == 0 ) {		//	Alarme Silencieuse
-        if (textesms.indexOf(F("ON")) == 7) { //ON
-          if (!config.Silence) {
-            config.Silence = !config.Silence;
-            digitalWrite(PinSirene, LOW);// Arret Sonnerie
-            sauvConfig();														// sauvegarde en EEPROM
-          }
-        }
-        if (textesms.indexOf(F("OFF")) == 7) {
-          if (config.Silence) {
-            config.Silence = !config.Silence;
-            sauvConfig();														// sauvegarde en EEPROM
-          }
-        }
-        generationMessage(0);
-        EnvoyerSms(number, sms);
-        } */
       else if (textesms.indexOf(F("ANTICIP")) > -1) { // Anticipation du wakeup
         if (textesms.indexOf(char(61)) == 7) {
           int n = textesms.substring(8, textesms.length()).toInt();
@@ -927,129 +861,6 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      /* else if (textesms.indexOf(F("PARAM")) == 0) { // parametre Jour/Nuit
-        if (textesms.indexOf(char(61)) == 5) { //char(61) "="
-          Sbidon = textesms.substring(6, textesms.length());
-          byte pos = Sbidon.indexOf(char(44)); // char(44) ","
-          Serial.print(Sbidon), Serial.print(":"), Serial.println(pos);
-          int val = Sbidon.substring(0, pos).toInt();
-          Serial.println(val);
-          if (val > 9 && val < 600) {
-            int val2 = Sbidon.substring(pos + 1, Sbidon.length()).toInt();
-            if (val2 > 9 && val2 < 600) {
-              config.Jour_Nmax = val / 10; // 10 temps boucle acquisition=10s
-              config.Nuit_Nmax = val2 / 10;
-              Serial.print(F("Jour_Nmax = ")), Serial.print(val);
-              Serial.print(F(" Nuit_Nmax = ")), Serial.println(val2);
-              sauvConfig();											// sauvegarde en EEPROM
-            }
-          }
-        }
-        message += F("Parametres (s)");
-        message += fl;
-        message += F("Jour : ");
-        message += config.Jour_Nmax * 10 + fl;
-        message += F("Nuit : ");
-        message += config.Nuit_Nmax * 10 + fl;
-        message += F("Actuel : ");
-        message += Nmax * 10 + fl;
-        EnvoyerSms(number, sms);
-        } */
-      /* else if (textesms.indexOf(F("CAPTEUR")) == 0) {	// Capteurs actif CAPTEUR=1,0,1 (Pedale1,Pedale2,Coffret)
-        bool flag = true; // validation du format
-        if (textesms.indexOf(char(61)) == 7) { //char(61) "="	liste capteur actif
-          byte Num[3];
-          Sbidon = textesms.substring(8, 13);
-          // Serial.print("Sbidon="),Serial.print(Sbidon),Serial.println(Sbidon.length());
-          if (Sbidon.length() == 5) {
-            int j = 0;
-            for (int i = 0; i < 5; i += 2) {
-              if (Sbidon.substring(i, i + 1) == "0" || Sbidon.substring(i, i + 1) == "1") {
-                // Serial.print(",="),Serial.println(Sbidon.substring(i+1,i+2));
-                // Serial.print("X="),Serial.println(Sbidon.substring(i,i+1));
-                Num[j] = Sbidon.substring(i, i + 1).toInt();
-                // Serial.print(i),Serial.print(","),Serial.print(j),Serial.print(","),Serial.println(Num[j]);
-                j++;
-              }
-              else {
-                Serial.println(F("Format non reconnu"));
-                flag = false;// format pas bon
-              }
-            }
-            if (flag) { // sauv configuration
-              DesActiveInterrupt(); // desactive tous
-              config.Pedale1 = Num[0];
-              config.Pedale2 = Num[1];
-              config.Coffret = Num[2];
-              sauvConfig();											// sauvegarde en EEPROM
-              ActiveInterrupt();
-            }
-          }
-        }
-        if (flag) {
-          message += F("Pedale1 = ");
-          if (config.Pedale1) {
-            message += 1;
-          }
-          else {
-            message += 0;
-          }
-          message += fl;
-          message += F("Pedale2 = ");
-          if (config.Pedale2) {
-            message += 1;
-          }
-          else {
-            message += 0;
-          }
-          message += fl;
-          message += F("Coffret = ");
-          if (config.Coffret) {
-            message += 1;
-          }
-          else {
-            message += 0;
-          }
-          message += fl;
-        }
-        else {
-          message += F("Format non reconnu");
-        }
-
-        EnvoyerSms(number, sms);
-        } */
-      /* else if (textesms.indexOf(F("TEMPOSORTIE")) == 0) { // Tempo Eclairage Sortie
-        if (textesms.indexOf(char(61)) == 11) { // =
-          int i = textesms.substring(12).toInt();
-          // Serial.print(F("temposortie = ")),Serial.println(i);
-          if (i > 0 && i < 121) {
-            config.tempoSortie = i;
-            sauvConfig();                               // sauvegarde en EEPROM
-            TempoSortie = Alarm.timerRepeat(config.tempoSortie, Extinction); // tempo extinction a la sortie
-            Alarm.disable(TempoSortie);
-          }
-        }
-        message += F("Tempo Sortie Eclairage (s) = ");
-        message += config.tempoSortie;
-        message += fl;
-        EnvoyerSms(number, sms);
-        } */
-      /* else if (textesms.indexOf(F("TIMEOUTECL")) == 0) { // Timeout extinction secours
-        if (textesms.indexOf(char(61)) == 10) { // =
-          int i = textesms.substring(11).toInt();
-          // Serial.print("Cpt pedale = "),Serial.println(i);
-          if (i > 59 && i < 7201) {
-            config.timeOutS = i;
-            sauvConfig();                               // sauvegarde en EEPROM
-            TimeOut = Alarm.timerRepeat(config.timeOutS, Extinction); // tempo time out extinction
-            Alarm.disable(TimeOut);
-          }
-        }
-        message += F("Time Out Eclairage (s) = ");
-        message += config.timeOutS;
-        message += fl;
-        EnvoyerSms(number, sms);
-        } */
       else if (textesms.indexOf(F("DEBUT")) == 0) {     //	Heure Message Vie/debutJour
         if (textesms.indexOf(char(61)) == 5) {
           long i = atol(textesms.substring(6).c_str()); //	Heure message Vie
@@ -1065,52 +876,6 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      /* else if (textesms.indexOf(F("SONN")) == 0) {			//	Durée Sonnerie
-        if (textesms.indexOf(char(61)) == 4) {
-          int x = textesms.indexOf(":");
-          int y = textesms.indexOf(":", x + 1);
-
-          int i = atoi(textesms.substring(5, x).c_str());		//	Dsonn Sonnerie
-          int j = atoi(textesms.substring(x + 1, y).c_str());//	DsonnMax Sonnerie
-          int k = atoi(textesms.substring(y + 1).c_str()); 		//	Dsonnrepos Sonnerie
-          //Serial.print(i),Serial.print(char(44)),Serial.print(j),Serial.print(char(44)),Serial.println(k);
-          if (i > 5  && i <= 300 &&
-              j > i  && j <= 600 &&
-              k > 10 && k <= 300) {			//	ok si entre 10 et 300
-            config.Dsonn 			= i;
-            config.DsonnMax 	= j;
-            config.Dsonnrepos = k;
-            sauvConfig();															// sauvegarde en EEPROM
-            TSonn = Alarm.timerRepeat(config.Dsonn, ArretSonnerie);	// tempo durée de la sonnerie
-            Alarm.disable(TSonn);
-
-            TSonnMax = Alarm.timerRepeat(config.DsonnMax, SonnerieMax); // tempo maximum de sonnerie
-            Alarm.disable(TSonnMax);
-
-            TSonnRepos = Alarm.timerRepeat(config.Dsonnrepos, ResetSonnerie); // tempo repos apres maxi
-            Alarm.disable(TSonnRepos);
-          }
-        }
-        message += F("Param Sonnerie = ");
-        message += config.Dsonn;
-        message += ":";
-        message += config.DsonnMax;
-        message += ":";
-        message += config.Dsonnrepos;
-        message += "(s)";
-        message += fl;
-        EnvoyerSms(number, sms);
-        } */
-      /* else if (textesms.indexOf(F("SIRENE")) == 0) {			// Lancement SIRENE
-        digitalWrite(PinSirene, HIGH);	// Marche Sonnerie
-        Alarm.enable(TSonn);				// lancement tempo
-        message += F("Lancement Sirene");
-        message += fl;
-        message += config.Dsonn;
-        message += F("(s)");
-        message += fl;
-        EnvoyerSms(number, sms);
-        } */
       else if (textesms.indexOf(F("TIME")) > -1) {
         message += F("Heure Sys = ");
         message += displayTime(0);
@@ -1249,20 +1014,6 @@ fin_i:
         message += config.RepeatWakeUp;
         EnvoyerSms(number, sms);
       }
-      // else if (textesms.indexOf(F("TEMPOANALYSE")) == 0) { // Tempo Analyse Alarme apres reveil sur alarme EXT
-      // if ((textesms.indexOf(char(61))) == 12) {
-      // int i = textesms.substring(13).toInt(); //	durée
-      // if (i > 59 && i <= 1800) { // 1mn à 30mn
-      // config.Tanalyse = i;
-      // sauvConfig();															// sauvegarde en EEPROM
-      // TempoAnalyse = Alarm.timerRepeat(config.Tanalyse, FinAnalyse); // Tempo Analyse Alarme sur interruption
-      // Alarm.disable(TempoAnalyse);
-      // }
-      // }
-      // message += F("Tempo Analyse apres Wake up (s)=");
-      // message += config.Tanalyse;
-      // EnvoyerSms(number, sms);
-      // }
       else if (textesms.indexOf(F("LST2")) > -1) { //	Liste restreinte	//  =LST2=0,0,0,0,0,0,0,0,0
         bool flag = true; // validation du format
         if (textesms.indexOf(char(61)) == 4) { // "="
@@ -1404,68 +1155,31 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("MASTEROFF")) == 0) {
-        FlagMasterOff = true;
-        Extinction();
-        message += F("MasterOFF actif\n");
-        message += F("Allumage Impossible");
-        message += fl;
-        EnvoyerSms(number, sms);
-      }
-      else if (textesms.indexOf(F("MASTERON")) == 0) {
-        FlagMasterOff = false;
-        message += F("MasterOFF inactif\n");
-        message += F("Allumage possible");
-        message += fl;
-        EnvoyerSms(number, sms);
-      }
-      else if (textesms.indexOf(F("ALLUME")) == 0) {
-        if (!Allume) {
-          Allumage();
-          message += F("Allumage");
+      else if (textesms.indexOf(Id.substring(5, 9)) == 1) { // cherche CVXX
+        if (textesms.indexOf("D") == 0) {
+          Feux = 0;
+          Extinction(); // Violet 0, Blanc 0
+        }
+        else if (textesms.indexOf("A") == 0 || textesms.indexOf("F") == 0) {
+          Feux = 1;
+          Allumage(); // Violet 1, Blanc 0
+        }
+        else if (textesms.indexOf("O") == 0) {
+          Feux = 2;
+          Allumage(); // Violet 0, Blanc 1
+        }
+        else if (textesms.indexOf("M") == 0) {
+          Feux = 3;
+          Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
+        }
+        else if (textesms.indexOf("S") == 0) {
+          Feux = 4;
+          Allumage(); // Violet 0, Blanc Secteur Cli rapide
         }
         else {
-          message += F("Deja Allume");
+          message += "non reconnu" + fl;
         }
-        message += fl;
-        EnvoyerSms(number, sms);
-      }
-      else if (textesms.indexOf(F("ETEINDRE")) == 0) {
-        if (Allume) {
-          Extinction();
-          message += F("Exctinction");
-        }
-        else {
-          message += F("Deja Eteint");
-        }
-        message += fl;
-        EnvoyerSms(number, sms);
-      }
-      else if (textesms.indexOf(F("VIOLET=1")) == 0) {
-        Feux = 1;
-        Allumage();
-        message += "Violet = 1";
-        message += fl;
-        EnvoyerSms(number, sms);
-      }
-      else if (textesms.indexOf(F("BLANC=1")) == 0) {
-        Feux = 2;
-        Allumage();
-        message += "Blanc = 1";
-        message += fl;
-        EnvoyerSms(number, sms);
-      }
-      else if (textesms.indexOf(F("BLANC=CLI1")) == 0) {
-        Feux = 3;
-        Allumage();
-        message += "Blanc = Cli1";
-        message += fl;
-        EnvoyerSms(number, sms);
-      }
-      else if (textesms.indexOf(F("BLANC=CLI2")) == 0) {
-        Feux = 4;
-        Allumage();
-        message += "Blanc = Cli2";
+        message += textesms;
         message += fl;
         EnvoyerSms(number, sms);
       }
@@ -1557,7 +1271,7 @@ fin_i:
             if (config.Bp) {
               config.Bp = false;
               sauvConfig();
-              ActiveInterrupt();
+              DesActiveInterrupt();
             }
           }
         }
@@ -1585,7 +1299,6 @@ fin_i:
       EffaceSMS(slot);
     }
   }
-  // Alarm.enable(loopPrincipale);
 }
 //---------------------------------------------------------------------------
 void envoie_alarme() {
@@ -1646,26 +1359,27 @@ void generationMessage(bool n) {
     message += fl;
     FlagBp = false;
   }
-  message += "Allumage = ";
-  message += Allume;
-  message += fl;
+  // message += "Allumage = ";
+  // message += Allume;
+  // message += fl;
   switch (Feux) {
     case 0: // Violet 0, Blanc 0
-      message += "Feux Eteint";
+      message += "D";
       break;
     case 1: // Violet 1, Blanc 0
-      message += "Feux Violet";
+      message += "A";
       break;
     case 2: // Violet 0, Blanc 1
-      message += "Feux Blanc Fixe";
+      message += "O";
       break;
-    case 3: // Violet 0, Blanc Cli1
-      message += "Feux Blanc Cli lent";
+    case 3: // Violet 0, Blanc Manoeuvre Cli lent
+      message += "M";
       break;
-    case 4: // Violet 0, Blanc Cli2
-      message += "Feux Blanc Cli rapide";
+    case 4: // Violet 0, Blanc Secteur Cli rapide
+      message += "S";
       break;
   }
+  message += String(Id.substring(5, 9));
   message += fl;
   message += F("Batterie : ");
   if (!FlagAlarmeTension) {
@@ -1823,8 +1537,6 @@ void SignalVie() {
   MajHeure("");
   envoieGroupeSMS(0, 0);
   Sim800.delAllSms();// au cas ou, efface tous les SMS envoyé/reçu
-  // CptAllumage = 0;
-
 }
 //---------------------------------------------------------------------------
 void sauvConfig() { // sauve configuration en EEPROM
@@ -2074,9 +1786,6 @@ void FinJournee() {
   Sbidon  = F("FinJour ");
   Sbidon += Hdectohhmm(TIME_TO_SLEEP);
   MajLog(F("Auto"), Sbidon);
-  // Sbidon  = F("nbr allum =");
-  // Sbidon += CptAllumage;
-  MajLog(F("Auto"), Sbidon);
   DebutSleep();
 }
 //---------------------------------------------------------------------------
@@ -2292,9 +2001,9 @@ String Hdectohhmm(long Hdec) {
 }
 //---------------------------------------------------------------------------
 void DesActiveInterrupt() {
-  if (config.Bp) {
-    detachInterrupt(digitalPinToInterrupt(PinBp));
-  }
+  // if (config.Bp) {
+  detachInterrupt(digitalPinToInterrupt(PinBp));
+  // }
 }
 //---------------------------------------------------------------------------
 void ActiveInterrupt() {
@@ -2344,7 +2053,7 @@ void DebutSleep() {
   // ArretSonnerie();
   if (Allume)Extinction();
   // selection du pin mask en fonction des capteurs actif
-  const uint64_t ext_wakeup_pin_1_mask = 1ULL << PinBp;
+  // const uint64_t ext_wakeup_pin_1_mask = 1ULL << PinBp;
   // const uint64_t ext_wakeup_pin_2_mask = 1ULL << PinPedale2;
   // const uint64_t ext_wakeup_pin_3_mask = 1ULL << PinCoffret;
   // if (config.Intru) {
