@@ -182,8 +182,8 @@ champ record[5];
 
 struct  config_t           // Structure configuration sauvée en EEPROM
 {
-  int     anticip;         // temps anticipation du reveille au lancement s
   int     magic;           // num magique
+  int     anticip;         // temps anticipation du reveille au lancement s
   long    DebutJour;       // Heure message Vie, 7h matin en seconde = 7*60*60
   long    FinJour;         // Heure fin jour, 20h matin en seconde = 20*60*60
   long    RepeatWakeUp;    // Periodicité WakeUp Jour non circulé
@@ -272,8 +272,8 @@ void setup() {
     Serial.println(F("Nouvelle Configuration !"));
     config.magic         = Magique;
     config.anticip       = 90;
-    config.DebutJour     = 7 * 60 * 60;
-    config.FinJour       = 20 * 60 * 60;
+    config.DebutJour     = 9 * 60 * 60;
+    config.FinJour       = 19 * 60 * 60;
     config.RepeatWakeUp  = 60 * 60;
     config.timeoutWifi   = 10 * 60;
     config.Bp            = true;
@@ -1160,22 +1160,27 @@ fin_i:
         if (textesms.indexOf("D") == 0) {
           Feux = 0;
           Extinction(); // Violet 0, Blanc 0
+          MajLog(nom,"DCV");
         }
         else if (textesms.indexOf("A") == 0 || textesms.indexOf("F") == 0) {
           Feux = 1;
           Allumage(); // Violet 1, Blanc 0
+          MajLog(nom,"FCV");
         }
         else if (textesms.indexOf("O") == 0) {
           Feux = 2;
           Allumage(); // Violet 0, Blanc 1
+          MajLog(nom,"OCV");
         }
         else if (textesms.indexOf("M") == 0) {
           Feux = 3;
           Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
+          MajLog(nom,"MCV");
         }
         else if (textesms.indexOf("S") == 0) {
           Feux = 4;
           Allumage(); // Violet 0, Blanc Secteur Cli rapide
+          MajLog(nom,"SCV");
         }
         else {
           message += "non reconnu" + fl;
