@@ -94,8 +94,8 @@ String  webpage = "";
 bool    SPIFFS_present = false;
 #include "CSS.h"               // pageweb
 
-// #define RESET_PIN 18 // declaré par Sim800l.h
-// #define LED_PIN 5    // declaré par Sim800l.h
+// #define RESET_PIN     18   // declaré par Sim800l.h
+// #define LED_PIN        5   // declaré par Sim800l.h
 #define PinBattProc   35   // liaison interne carte Lolin32 adc
 #define PinBattSol    39   // Batterie générale 12V adc VN
 #define PinBattUSB    36   // V USB 5V adc VP 36, 25 ADC2 pas utilisable avec Wifi
@@ -124,8 +124,8 @@ char filecalibration[11] = "/coeff.txt";    // fichier en SPIFFS contenant les d
 char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le log
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V0-0.1";
-int    Magique    = 0003;
+String ver        = "V0-0.2";
+int    Magique    = 0004;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -180,22 +180,22 @@ typedef struct										// declaration structure  pour les log
 } champ;
 champ record[5];
 
-struct  config_t 								// Structure configuration sauvée en EEPROM
+struct  config_t           // Structure configuration sauvée en EEPROM
 {
-  int     anticip     ;         // temps anticipation du reveille au lancement s
-  int 		magic				;					// num magique
-  long    DebutJour 	;					// Heure message Vie, 7h matin en seconde = 7*60*60
-  long    FinJour 		;					// Heure fin jour, 20h matin en seconde = 20*60*60
-  long    RepeatWakeUp; 				// Periodicité WakeUp Jour non circulé
-  int			timeoutWifi ;					// tempo coupure Wifi si pas de mise a jour (s)
-  bool    Bp;                   // Bp Actif
-  int     SlowBlinker;          // ms
+  int     anticip;         // temps anticipation du reveille au lancement s
+  int     magic;           // num magique
+  long    DebutJour;       // Heure message Vie, 7h matin en seconde = 7*60*60
+  long    FinJour;         // Heure fin jour, 20h matin en seconde = 20*60*60
+  long    RepeatWakeUp;    // Periodicité WakeUp Jour non circulé
+  int     timeoutWifi;     // tempo coupure Wifi si pas de mise a jour (s)
+  bool    Bp;              // Bp Actif
+  int     SlowBlinker;     // ms
   int     FastBlinker;
   int     FastRater;
-  int     FVltPWM;              // Modulation Feux Violet %
-  int     FBlcPWM;              // Modulation Feux Blanc %
-  bool    Pos_Pn_PB[10];        // numero du Phone Book (1-9) à qui envoyer 0/1 0 par defaut
-  char 		Idchar[11];						// Id
+  int     FVltPWM;         // Modulation Feux Violet %
+  int     FBlcPWM;         // Modulation Feux Blanc %
+  bool    Pos_Pn_PB[10];   // numero du Phone Book (1-9) à qui envoyer 0/1 0 par defaut
+  char 		Idchar[11];			// Id
 } ;
 config_t config;
 
@@ -280,8 +280,8 @@ void setup() {
     config.SlowBlinker   = 500;
     config.FastBlinker   = 150;
     config.FastRater     = 1000;
-    config.FBlcPWM       = 100;
-    config.FVltPWM       = 100;
+    config.FBlcPWM       = 75;
+    config.FVltPWM       = 75;
     for (int i = 0; i < 10; i++) {// initialise liste PhoneBook liste restreinte
       config.Pos_Pn_PB[i] = 0;
     }
@@ -400,6 +400,7 @@ void loop() {
     Serial.print(F("Interruption : "));
     Serial.println(IRQ_Cpt_Bp);
     Feux = 3; // Violet 0, Blanc Manoeuvre Cli lent
+    MajLog("Manuel","Bp local");
     Allumage();
     if (!FlagBp) {
       FlagBp = true;
@@ -520,7 +521,7 @@ void Acquisition() {
 }
 //---------------------------------------------------------------------------
 void GestionFeux(int mode) {
-  Feux = mode;
+  // Feux = mode;
   switch (mode) {
     case 0: // Violet 0, Blanc 0
       Serial.println("Feux Eteint");
