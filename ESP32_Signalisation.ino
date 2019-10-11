@@ -68,8 +68,8 @@
 	to do
 
   Compilation LOLIN D32,default,80MHz,
-	Arduino IDE 1.8.9 : 986342 75%, 47544 14% sur PC
-	Arduino IDE 1.8.9 : 980450 74%, 48172 14% sur raspi
+	Arduino IDE 1.8.10 : 980470 74%, 47488 14% sur PC
+	Arduino IDE 1.8.10 : 974778 74%, 48108 14% sur raspi
 
 */
 
@@ -520,9 +520,9 @@ void Acquisition() {
   Serial.println();
 }
 //---------------------------------------------------------------------------
-void GestionFeux(int mode) {
+void GestionFeux() {
   // Feux = mode;
-  switch (mode) {
+  switch (Feux) {
     case 0: // Violet 0, Blanc 0
       Serial.println("Feux Eteint");
       ledcWrite(VltPwmChanel, 0);
@@ -562,8 +562,8 @@ void GestionFeux(int mode) {
       SlowBlink.detach();
       FastRate.attach_ms(config.FastRater, toggle);
       break;
-    default:
-      GestionFeux(0);
+    // default:
+      // GestionFeux(0);
   }
 }
 //---------------------------------------------------------------------------
@@ -594,14 +594,15 @@ void Allumage() {
   Serial.println("Allumage");
   Allume = true;
   digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
-  GestionFeux(Feux);
+  GestionFeux();
 }
 //---------------------------------------------------------------------------
 void Extinction() {
   Serial.println("Exctinction");
   Allume = false;
   digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
-  GestionFeux(Feux);
+  Feux = 0;
+  // GestionFeux();
 }
 //---------------------------------------------------------------------------
 void traite_sms(byte slot) {
@@ -654,6 +655,7 @@ void traite_sms(byte slot) {
     }
     else {
       textesms = String(replybuffer);
+      nom = F("console");
     }
 
     if (!(textesms.indexOf(F("TEL")) == 0 || textesms.indexOf(F("tel")) == 0 || textesms.indexOf(F("Tel")) == 0
@@ -717,7 +719,7 @@ void traite_sms(byte slot) {
           j = 5;
           // on efface la ligne sauf la 1 pour toujours garder au moins un numéro
           if ( (i != 1) && (textesms.indexOf(F("efface")) == 5
-                            || textesms.indexOf(F("EFFACE")) == 5 )) goto fin_tel;
+                         || textesms.indexOf(F("EFFACE")) == 5 )) goto fin_tel;
         }
         else if (textesms.indexOf(char(61)) == 3) { // TEL= nouveau numero
           j = 4;
@@ -1373,7 +1375,7 @@ void generationMessage(bool n) {
       message += "D";
       break;
     case 1: // Violet 1, Blanc 0
-      message += "A";
+      message += "F";
       break;
     case 2: // Violet 0, Blanc 1
       message += "O";
