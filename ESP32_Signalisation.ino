@@ -4,12 +4,12 @@
 
   2 feux Violet et Blanc
   Etat des feux
-              | Violet | Blanc | Feux
-  OFF         |    0   |   0   |  0
-  Violet Fixe |    1   |   0   |  1
-  Blanc Fixe  |    0   |   1   |  2
-  Blanc Cli 1 |    0   |  Cli1 |  3
-  Blanc Cli 2 |    0   |  Cli2 |  4
+              | Violet | Blanc | Feux | Cde
+  OFF         |    0   |   0   |  0   |  D
+  Violet Fixe |    1   |   0   |  1   |  F
+  Blanc Fixe  |    0   |   1   |  2   |  O
+  Blanc Cli 1 |    0   |  Cli1 |  3   |  M
+  Blanc Cli 2 |    0   |  Cli2 |  4   |  S
 
   cadence clignotant parametrable
   Cli1 0.5s ON, 0.5s OFF
@@ -67,9 +67,9 @@
 
 	to do
 
-  Compilation LOLIN D32,default,80MHz,
-	Arduino IDE 1.8.10 : 980470 74%, 47488 14% sur PC
-	Arduino IDE 1.8.10 : 974778 74%, 48108 14% sur raspi
+  Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
+  Arduino IDE 1.8.10 : 980542 74%, 47488 14% sur PC
+  Arduino IDE 1.8.10 : 980518 75%, 47488 14% sur raspi
 
 */
 
@@ -400,7 +400,7 @@ void loop() {
     Serial.print(F("Interruption : "));
     Serial.println(IRQ_Cpt_Bp);
     Feux = 3; // Violet 0, Blanc Manoeuvre Cli lent
-    MajLog("Manuel","Bp local");
+    MajLog("Manuel", "Bp local");
     Allumage();
     if (!FlagBp) {
       FlagBp = true;
@@ -562,7 +562,7 @@ void GestionFeux() {
       SlowBlink.detach();
       FastRate.attach_ms(config.FastRater, toggle);
       break;
-    // default:
+      // default:
       // GestionFeux(0);
   }
 }
@@ -602,6 +602,8 @@ void Extinction() {
   Allume = false;
   digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
   Feux = 0;
+  MajLog(F("Auto"), "Feux = " + String(Feux));
+  envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
   // GestionFeux();
 }
 //---------------------------------------------------------------------------
@@ -719,7 +721,7 @@ void traite_sms(byte slot) {
           j = 5;
           // on efface la ligne sauf la 1 pour toujours garder au moins un numéro
           if ( (i != 1) && (textesms.indexOf(F("efface")) == 5
-                         || textesms.indexOf(F("EFFACE")) == 5 )) goto fin_tel;
+                            || textesms.indexOf(F("EFFACE")) == 5 )) goto fin_tel;
         }
         else if (textesms.indexOf(char(61)) == 3) { // TEL= nouveau numero
           j = 4;
@@ -1162,34 +1164,34 @@ fin_i:
         if (textesms.indexOf("D") == 0) {
           Feux = 0;
           Extinction(); // Violet 0, Blanc 0
-          MajLog(nom,"DCV");
+          MajLog(nom, "DCV");
         }
         else if (textesms.indexOf("A") == 0 || textesms.indexOf("F") == 0) {
           Feux = 1;
           Allumage(); // Violet 1, Blanc 0
-          MajLog(nom,"FCV");
+          MajLog(nom, "FCV");
         }
         else if (textesms.indexOf("O") == 0) {
           Feux = 2;
           Allumage(); // Violet 0, Blanc 1
-          MajLog(nom,"OCV");
+          MajLog(nom, "OCV");
         }
         else if (textesms.indexOf("M") == 0) {
           Feux = 3;
           Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
-          MajLog(nom,"MCV");
+          MajLog(nom, "MCV");
         }
         else if (textesms.indexOf("S") == 0) {
           Feux = 4;
           Allumage(); // Violet 0, Blanc Secteur Cli rapide
-          MajLog(nom,"SCV");
+          MajLog(nom, "SCV");
         }
         else {
-          message += "non reconnu" + fl;
+          // message += "non reconnu" + fl;
         }
-        message += textesms;
-        message += fl;
-        EnvoyerSms(number, sms);
+        generationMessage(0);
+        envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
+        // EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("BLCPWM")) == 0) {
         if (textesms.substring(6, 7) == "=") {
@@ -1407,17 +1409,17 @@ void generationMessage(bool n) {
     message += F("Alarme 24V = ");
     message += String(float(Tension24 / 100.0)) + "V" + fl;
   }
-  if (Allume) {
-    for (int i = 0; i < 5 ; i++) {
-      read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V);
-      Alarm.delay(1);
-    }
-    char bid[8];
-    sprintf(bid, "%.2lf V", float(Tension24) / 100);
-    message += F("Allume : ");
-    message += String(bid);
-    message += fl;
-  }
+  // if (Allume) {
+  // for (int i = 0; i < 5 ; i++) {
+  // read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V);
+  // Alarm.delay(1);
+  // }
+  // char bid[8];
+  // sprintf(bid, "%.2lf V", float(Tension24) / 100);
+  // message += F("Allume : ");
+  // message += String(bid);
+  // message += fl;
+  // }
   if ((calendrier[month()][day()] ^ flagCircule)) {
     message += F("Jour Circule");
   }
@@ -1791,9 +1793,10 @@ void FinJournee() {
   FirstWakeup = true;
   Serial.println(F("Fin de journee retour sleep"));
   TIME_TO_SLEEP = DureeSleep(config.DebutJour - config.anticip);// 1.5mn avant
-  Sbidon  = F("FinJour ");
+  Sbidon  = F("FinJour, sleep for ");
   Sbidon += Hdectohhmm(TIME_TO_SLEEP);
   MajLog(F("Auto"), Sbidon);
+  if (Allume)Extinction();
   DebutSleep();
 }
 //---------------------------------------------------------------------------
@@ -2059,7 +2062,7 @@ void IntruD() { // Charge parametre Alarme Intrusion Nuit
 //---------------------------------------------------------------------------
 void DebutSleep() {
   // ArretSonnerie();
-  if (Allume)Extinction();
+  
   // selection du pin mask en fonction des capteurs actif
   // const uint64_t ext_wakeup_pin_1_mask = 1ULL << PinBp;
   // const uint64_t ext_wakeup_pin_2_mask = 1ULL << PinPedale2;
@@ -2162,14 +2165,14 @@ void action_wakeup_reason(byte wr) { // action en fonction du wake up
         SignalVie();
         FirstWakeup = false;
       }
-      if ((calendrier[month()][day()] ^ flagCircule) ) { // jour circulé (&& jour)
+      if ((calendrier[month()][day()] ^ flagCircule) && jour ) { // jour circulé (&& jour)
         // Nmax = config.Jour_Nmax; // parametre jour
         Sbidon = F("Jour circule ou demande circulation");
         Serial.println(Sbidon);
         MajLog(F("Auto"), Sbidon);
       }
       else { // non circulé
-        Sbidon = F("Jour noncircule");
+        Sbidon = F("Jour noncircule ou nuit");
         Serial.println(Sbidon);
         MajLog(F("Auto"), Sbidon);
         // Nmax = config.Nuit_Nmax; // parametre nuit
