@@ -68,7 +68,7 @@
 	to do
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 980542 74%, 47488 14% sur PC
+  Arduino IDE 1.8.10 : 980430 74%, 47488 14% sur PC
   Arduino IDE 1.8.10 : 980518 75%, 47488 14% sur raspi
 
 */
@@ -599,12 +599,12 @@ void Allumage() {
 //---------------------------------------------------------------------------
 void Extinction() {
   Serial.println("Exctinction");
+  Feux = 0;
+  GestionFeux();
   Allume = false;
   digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
-  Feux = 0;
   MajLog(F("Auto"), "Feux = " + String(Feux));
-  envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
-  // GestionFeux();
+  envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur 
 }
 //---------------------------------------------------------------------------
 void traite_sms(byte slot) {
