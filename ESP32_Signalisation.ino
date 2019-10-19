@@ -68,7 +68,7 @@
 	to do
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 980430 74%, 47488 14% sur PC
+  Arduino IDE 1.8.10 : 980494 74%, 47488 14% sur PC
   Arduino IDE 1.8.10 : 980518 75%, 47488 14% sur raspi
 
 */
@@ -527,6 +527,8 @@ void GestionFeux() {
       Serial.println("Feux Eteint");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinFVlt, LOW);
+      digitalWrite(PinFBlc, LOW);
       SlowBlink.detach();
       FastBlink.detach();
       FastRate.detach();
@@ -535,6 +537,7 @@ void GestionFeux() {
       Serial.println("Feux Violet");
       ledcWrite(VltPwmChanel, 255 * config.FVltPWM / 100);
       ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinFBlc, LOW);
       SlowBlink.detach();
       FastBlink.detach();
       FastRate.detach();
@@ -551,6 +554,7 @@ void GestionFeux() {
       Serial.println("Feux Blc Clignotant lent");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinFVlt, LOW);
       FastBlink.detach();
       FastRate.detach();
       SlowBlink.attach_ms(config.SlowBlinker, blink);
@@ -559,6 +563,7 @@ void GestionFeux() {
       Serial.println("Feux Blc Clignotant rapide");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinFVlt, LOW);
       SlowBlink.detach();
       FastRate.attach_ms(config.FastRater, toggle);
       break;
