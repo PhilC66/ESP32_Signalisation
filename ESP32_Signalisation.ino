@@ -480,7 +480,7 @@ void Acquisition() {
     if (nalaTension > 0)nalaTension--;		//	efface progressivement le compteur
   }
 
-  message = F("Batt Solaire = ");
+  message = F(" Batt Solaire = ");
   message += float(TensionBatterie / 100.0);
   message += "V ";
   message += String(BattPBpct(TensionBatterie, 6));
@@ -848,7 +848,7 @@ fin_i:
         EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("LOG")) == 0) {	// demande log des 5 derniers commandes
-        File f = SPIFFS.open(filelog, "r");
+        File f = SPIFFS.open(filelog, "r"); // taille du fichier log en SPIFFS
         message = F("local log size :");
         message += String(f.size()) + fl;
         f.close();
@@ -1198,9 +1198,9 @@ fin_i:
         envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
         // EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("BLCPWM")) == 0) {
-        if (textesms.substring(6, 7) == "=") {
-          int i = textesms.substring(7, textesms.length()).toInt();
+      else if (textesms.indexOf(F("FBLCPWM")) == 0) {
+        if (textesms.substring(7, 8) == "=") {
+          int i = textesms.substring(8, textesms.length()).toInt();
           if (i > 4 && i < 101) {
             config.FBlcPWM = i;
             sauvConfig();
@@ -1213,9 +1213,9 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("VLTPWM")) == 0) {
-        if (textesms.substring(6, 7) == "=") {
-          int i = textesms.substring(7, textesms.length()).toInt();
+      else if (textesms.indexOf(F("FVLTPWM")) == 0) {
+        if (textesms.substring(7, 8) == "=") {
+          int i = textesms.substring(8, textesms.length()).toInt();
           if (i > 4 && i < 101) {
             config.FVltPWM = i;
             sauvConfig();
