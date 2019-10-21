@@ -421,6 +421,8 @@ void Acquisition() {
   static bool firstdecision = false;
   static byte cptallume = 0; // compte le nombre de passage avec Allume
 
+  AIntru_HeureActuelle();
+
   if (cpt > 6 && nsms == 0 && !firstdecision) {
     /* une seule fois au demarrage attendre au moins 70s et plus de sms en attente */
     action_wakeup_reason(get_wakeup_reason());
@@ -514,8 +516,6 @@ void Acquisition() {
   digitalWrite(LED_PIN, 0);
   Alarm.delay(20);
   digitalWrite(LED_PIN, 1);
-
-  AIntru_HeureActuelle();
 
   Serial.println();
 }
