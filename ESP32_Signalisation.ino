@@ -66,10 +66,12 @@
 
 
 	to do
+  jour non circule continue sans sleep voir log 26/10
+  corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 980494 74%, 47488 14% sur PC
-  Arduino IDE 1.8.10 : 980518 75%, 47488 14% sur raspi
+  Arduino IDE 1.8.10 : 980554 74%, 47488 14% sur PC
+  Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
 
@@ -124,8 +126,8 @@ char filecalibration[11] = "/coeff.txt";    // fichier en SPIFFS contenant les d
 char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le log
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V0-0.2";
-int    Magique    = 0004;
+String ver        = "V0-0.4";
+int    Magique    = 0005;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -276,7 +278,7 @@ void setup() {
     config.FinJour       = 19 * 60 * 60;
     config.RepeatWakeUp  = 60 * 60;
     config.timeoutWifi   = 10 * 60;
-    config.Bp            = true;
+    config.Bp            = false;
     config.SlowBlinker   = 500;
     config.FastBlinker   = 150;
     config.FastRater     = 1000;
@@ -450,10 +452,13 @@ void Acquisition() {
 
   if (Allume) {
     cptallume ++;
-    Serial.print(F("Tension 24V :")), Serial.print(float(Tension24 / 100.0)), Serial.print(F(" "));
+    Serial.print(F(" Tension 24V :")), Serial.print(float(Tension24 / 100.0)), Serial.print(F(" "));
     Serial.print("coeff 24V="), Serial.println(CoeffTension[3]);
-    if (cptallume > 2 && Tension24 < 2000) { // on attend 2 passages pour mesurer 24V
+    if (cptallume > 2 && Tension24 < 2000) { // on attend 3 passages pour mesurer 24V
       FlagAlarme24V = true;
+    }
+    else if(Tension24 > 2100){
+      FlagAlarme24V = false;
     }
   }
   else {
@@ -1195,7 +1200,9 @@ fin_i:
           // message += "non reconnu" + fl;
         }
         generationMessage(0);
-        envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
+        if(Feux !=0){ // seulement si different de DCV, doublon DCV envoie automatiquement une reponse
+          envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
+        }
         // EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("FBLCPWM")) == 0) {
@@ -1439,7 +1446,10 @@ void EnvoyerSms(char *num, bool sms) {
   if (sms) { // envoie sms
     message.toCharArray(replybuffer, message.length() + 1);
     bool OK = Sim800.sendSms(num, replybuffer);
-    if (OK)Serial.println(F("send sms OK"));
+    if (OK){
+      Serial.print(F("send sms OK:"));
+      Serial.println(num);
+    }
   }
   Serial.print (F("Message (long) = ")), Serial.println(message.length());
   Serial.println(message);
@@ -1464,6 +1474,16 @@ void read_RSSI() {	// lire valeur RSSI et remplir message
 }
 //---------------------------------------------------------------------------
 void MajHeure(String smsdate) {
+  /*parametrage du SIM800 a faire une fois
+    AT+CLTS? si retourne 0
+    AT+CLTS=1
+    AT+CENG=3
+    AT&W pour sauvegarder ce parametre
+    si AT+CCLK? pas OK
+    avec Fonatest passer en GPRS 'G', envoyer 'Y' la sync doit se faire, couper GPRS 'g'
+    't' ou AT+CCLK? doit donner la date et heure réseau
+    format date retourné par Fona "yy/MM/dd,hh:mm:ss±zz",
+    +CCLK: "14/08/08,02:25:43-16" -16= décalage GMT en n*1/4heures(-4) */
   if (smsdate.length() > 1) { // si smsdate present mise a l'heure forcé
     Sim800.SetTime(smsdate);
   }
@@ -1797,7 +1817,7 @@ void FinJournee() {
   flagCircule = false;
   FirstWakeup = true;
   Serial.println(F("Fin de journee retour sleep"));
-  TIME_TO_SLEEP = DureeSleep(config.DebutJour - config.anticip);// 1.5mn avant
+  TIME_TO_SLEEP = DureeSleep(config.DebutJour - config.anticip);// xx mn avant
   Sbidon  = F("FinJour, sleep for ");
   Sbidon += Hdectohhmm(TIME_TO_SLEEP);
   MajLog(F("Auto"), Sbidon);
@@ -2066,33 +2086,6 @@ void IntruD() { // Charge parametre Alarme Intrusion Nuit
 }
 //---------------------------------------------------------------------------
 void DebutSleep() {
-  // ArretSonnerie();
-  
-  // selection du pin mask en fonction des capteurs actif
-  // const uint64_t ext_wakeup_pin_1_mask = 1ULL << PinBp;
-  // const uint64_t ext_wakeup_pin_2_mask = 1ULL << PinPedale2;
-  // const uint64_t ext_wakeup_pin_3_mask = 1ULL << PinCoffret;
-  // if (config.Intru) {
-  // if (config.Coffret && config.Pedale1 && config.Pedale2) {
-  // esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_1_mask  | ext_wakeup_pin_2_mask | ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_HIGH);
-  // } else if (config.Coffret && config.Pedale1) {
-  // esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_1_mask  | ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_HIGH);
-  // } else if (config.Coffret && config.Pedale2) {
-  // esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_2_mask | ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_HIGH);
-  // } else if (config.Pedale1 && config.Pedale2) {
-  // esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_1_mask  | ext_wakeup_pin_2_mask, ESP_EXT1_WAKEUP_ANY_HIGH);
-  // } else if (config.Coffret) {
-  // esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_HIGH);
-  // } else if (config.Pedale1) {
-  // esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_1_mask, ESP_EXT1_WAKEUP_ANY_HIGH);
-  // } else if (config.Pedale2) {
-  // esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_2_mask, ESP_EXT1_WAKEUP_ANY_HIGH);
-  // }
-  // }
-  // else {
-  // /* pas de wakeup sur pin */
-  // Serial.println(F("pas de pin selectionne pour wakeup!"));
-  // }
 
   /* Garde fou si TIME_TO_SLEEP > 20H00 c'est une erreur, on impose 1H00 */
   if (TIME_TO_SLEEP > 72000) {
@@ -2115,6 +2108,11 @@ void DebutSleep() {
   Serial.print(F("s ;"));
   Serial.println(Hdectohhmm(TIME_TO_SLEEP));
   Serial.flush();
+
+  if(TIME_TO_SLEEP == 1){
+    Serial.println(F("pas de sleep on continue"));
+    return;
+  }
   //Go to sleep now
   Serial.println(F("Going to sleep now"));
 
@@ -2170,7 +2168,7 @@ void action_wakeup_reason(byte wr) { // action en fonction du wake up
         SignalVie();
         FirstWakeup = false;
       }
-      if ((calendrier[month()][day()] ^ flagCircule) && jour ) { // jour circulé (&& jour)
+      if ((calendrier[month()][day()] ^ flagCircule)) { // jour circulé (&& jour)
         // Nmax = config.Jour_Nmax; // parametre jour
         Sbidon = F("Jour circule ou demande circulation");
         Serial.println(Sbidon);
