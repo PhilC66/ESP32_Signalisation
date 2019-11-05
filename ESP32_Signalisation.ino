@@ -70,7 +70,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 980554 74%, 47488 14% sur PC
+  Arduino IDE 1.8.10 : 980530 74%, 47488 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -309,7 +309,7 @@ void setup() {
 
   // Port defaults to 3232
   // ArduinoOTA.setPort(3232);
-  ArduinoOTA.setHostname("ESP32_Signalisation");
+  ArduinoOTA.setHostname(config.Idchar);
   ArduinoOTA.setPasswordHash(OTApwdhash);
   ArduinoOTA
   .onStart([]() {
