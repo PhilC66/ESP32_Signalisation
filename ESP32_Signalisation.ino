@@ -144,6 +144,8 @@ byte recordn = 100;                 // position enregistrement log EEPROM
 bool Allume  = false;
 byte BlcPwmChanel = 0;
 byte VltPwmChanel = 1;
+bool isBlinking = false;
+bool blinker = false;
 
 RTC_DATA_ATTR int  Feux = 0; // Etat des Feux voir tableau au début
 RTC_DATA_ATTR bool FlagAlarmeTension       = false; // Alarme tension Batterie
@@ -365,6 +367,8 @@ void setup() {
 
   Serial.print(F("flag Circule :")), Serial.println(flagCircule);
 
+  // SelftestFeux();
+
 }
 //---------------------------------------------------------------------------
 void loop() {
@@ -526,7 +530,6 @@ void Acquisition() {
 }
 //---------------------------------------------------------------------------
 void GestionFeux() {
-  // Feux = mode;
   switch (Feux) {
     case 0: // Violet 0, Blanc 0
       Serial.println("Feux Eteint");
@@ -569,7 +572,12 @@ void GestionFeux() {
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
       digitalWrite(PinFVlt, LOW);
+      digitalWrite(PinFBlc, LOW);
       SlowBlink.detach();
+      FastBlink.detach();
+      FastRate.detach();
+      isBlinking = true;
+      blinker = false;
       FastRate.attach_ms(config.FastRater, toggle);
       break;
       // default:
@@ -578,7 +586,6 @@ void GestionFeux() {
 }
 //---------------------------------------------------------------------------
 void toggle() {
-  static bool isBlinking = false;
   if (isBlinking) {
     FastBlink.detach();
     isBlinking = false;
@@ -590,7 +597,6 @@ void toggle() {
 }
 //---------------------------------------------------------------------------
 void blink() {
-  static bool blinker = false;
   if (blinker) {
     ledcWrite(BlcPwmChanel, 0);
     blinker = false;
@@ -615,6 +621,28 @@ void Extinction() {
   digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
   MajLog(F("Auto"), "Feux = " + String(Feux));
   envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur 
+}
+//---------------------------------------------------------------------------
+void SelftestFeux(){
+  digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
+  int memFeux = Feux; // memorisation etat Feux
+  for(int i=1;i<5;i++){
+    Feux = i;
+    GestionFeux();
+    if(i==4){
+      Alarm.delay(3000);
+    }
+    else{
+      Alarm.delay(2000);
+    }
+  }
+  Feux=0;
+  GestionFeux();
+  digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
+  Feux = memFeux; // restitution etat Feux
+  if(Allume){
+    Allumage(); // retour etat precedent
+  }
 }
 //---------------------------------------------------------------------------
 void traite_sms(byte slot) {
@@ -1280,6 +1308,12 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
+      else if (textesms.indexOf(F("SELFTEST")) == 0) {
+        SelftestFeux();
+        message += "Lancement Selftest";
+        message += fl;
+        EnvoyerSms(number, sms);
+      }
       else if (textesms.indexOf(F("BPACTIF")) == 0) {
         if (textesms.substring(7, 8) == "=") {
           if (textesms.substring(8, 9) == "1") {
@@ -1338,7 +1372,7 @@ void envoie_alarme() {
     FlagLastAlarmeTension = FlagAlarmeTension;
   }
   if (SendEtat) { 						// si envoie Etat demandé
-    envoieGroupeSMS(0, 0);			// envoie groupé
+    envoieGroupeSMS(0, 0);		// envoie groupé
     SendEtat = false;					// efface demande
   }
 }
