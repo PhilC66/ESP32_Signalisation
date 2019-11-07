@@ -70,7 +70,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 980530 74%, 47488 14% sur PC
+  Arduino IDE 1.8.10 : 980930 74%, 47496 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -366,6 +366,10 @@ void setup() {
   ActiveInterrupt();
 
   Serial.print(F("flag Circule :")), Serial.println(flagCircule);
+
+  if(Feux != 0){  // si une valeur Feux different de 0 en memoire RTC, on Allume les feux
+    Allumage();
+  }
 
   // SelftestFeux();
 
