@@ -12,8 +12,10 @@
   Blanc Cli 2 |    0   |  Cli2 |  4   |  S
 
   cadence clignotant parametrable
-  Cli1 0.5s ON, 0.5s OFF
-  Cli1 1s OFF, 0.15s ON/OFF pendant 1s
+  SlowBlinker = 500 Cli1 0.5s ON, 0.5s OFF
+  Cli2 1s OFF, 0.15s ON/OFF pendant 1s
+  FastRater = 1000/1300/1600/1900 FastBlinker = 150
+  FastRater = 1000/1300/(1400)/1700/1800 FastBlinker = (200)
 
   Alimentation sur panneaux solaires
 
@@ -109,13 +111,16 @@ bool    SPIFFS_present = false;
 #define RX_PIN        16   // TX Sim800
 #define TX_PIN        17   // RX Sim800
 #define PinReset      13   // Reset Hard
+#define PinLum        34   // Mesure Luminosité
+#define PinAlimLum    25   // Alimentation LDR
+#define PinTest       27   // Test sans GSM cc a la masse
 #define SIMPIN        1234 // Code PIN carte SIM
 
 #define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
 
 #define nSample (1<<4)    // nSample est une puissance de 2, ici 16 (4bits)
-unsigned int adc_hist[4][nSample]; // tableau stockage mesure adc, 0 Batt, 1 Proc, 2 USB
-unsigned int adc_mm[4];            // stockage pour la moyenne mobile
+unsigned int adc_hist[5][nSample]; // tableau stockage mesure adc, 0 Batt, 1 Proc, 2 USB, 3 24V, 5 Lum
+unsigned int adc_mm[5];            // stockage pour la moyenne mobile
 
 uint64_t TIME_TO_SLEEP  = 15;/* Time ESP32 will go to sleep (in seconds) */
 unsigned long debut     = 0; // pour decompteur temps wifi
@@ -124,10 +129,11 @@ byte calendrier[13][32]; // tableau calendrier ligne 0 et jour 0 non utilisé, 1
 char filecalendrier[13]  = "/filecal.csv";  // fichier en SPIFFS contenant le calendrier de circulation
 char filecalibration[11] = "/coeff.txt";    // fichier en SPIFFS contenant les data de calibration
 char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le log
+char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V0-0.4";
-int    Magique    = 0005;
+String ver        = "V0-0.5";
+int    Magique    = 0007;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -160,6 +166,7 @@ bool FlagLastAlarme24V       = false;
 bool FlagBp                  = false; // Bp local enfoncé
 bool FlagReset = false;       // Reset demandé
 bool jour      = false;				// jour = true, nuit = false
+bool gsm       = true;        // carte GSM presente utilisé pour test sans GSM seulement
 
 int CoeffTension[4];          // Coeff calibration Tension
 int CoeffTensionDefaut = 7000;// Coefficient par defaut
@@ -172,6 +179,8 @@ long   TensionBatterie  = 0; // Tension Batterie solaire
 long   VBatterieProc    = 0; // Tension Batterie Processeur
 long   VUSB             = 0; // Tension USB
 long   Tension24        = 0; // Tension 24V Allumage
+int    Lum              = 0; // Luminosité 0-100%
+int    TableLum[11][2];      // Table PWM en fonction Luminosité
 
 WebServer server(80);
 File UploadFile;
@@ -230,24 +239,39 @@ void IRAM_ATTR handleInterruptBp() { // Bouton Poussoir
 //---------------------------------------------------------------------------
 
 void setup() {
+
   message.reserve(140);
 
   Serial.begin(115200);
   Serial.println();
-  Serial.println(F("lancement SIM800"));
-  SIM800Serial->begin(9600); // 4800
-  Sim800.begin();
-
+  
   pinMode(PinBp      , INPUT_PULLUP);
   pinMode(PinFBlc    , OUTPUT);
   pinMode(PinFVlt    , OUTPUT);
   pinMode(PinConvert , OUTPUT);
+  pinMode(PinAlimLum , OUTPUT);
+  pinMode(PinTest    , INPUT_PULLUP);
   digitalWrite(PinConvert , LOW); // Alimentation Convert 0
+  digitalWrite(PinAlimLum , HIGH); // Alimentation de la LDR
   adcAttachPin(PinBattProc);
   adcAttachPin(PinBattSol);
   adcAttachPin(PinBattUSB);
   adcAttachPin(Pin24V);
+  adcAttachPin(PinLum);
 
+  if(digitalRead(PinTest) == 0){ // lire strap test, si = 0 test sans carte gsm
+    gsm = false;
+    setTime(12, 00, 00, 01, 11, 2019); // il faut initialiser la date et heure
+    Serial.println("Lancement test sans carte gsm");
+    Serial.println("retirer lecavalier Pin27 et reset");
+    Serial.println("pour redemarrer normalement");
+  }
+
+  if (gsm) {
+    Serial.println(F("lancement SIM800"));
+    SIM800Serial->begin(9600); // 4800
+    Sim800.begin();
+  }
   // parametrage PWM pour les feux
   // https://randomnerdtutorials.com/esp32-pwm-arduino-ide/
   ledcSetup(BlcPwmChanel, 1000, 8);
@@ -353,9 +377,12 @@ void setup() {
 
   OuvrirCalendrier();					// ouvre calendrier circulation en SPIFFS
   OuvrirFichierCalibration(); // ouvre fichier calibration en SPIFFS
+  OuvrirLumLUT();             // ouvre le fichier lumLUT
   // Serial.print(F("temps =")),Serial.println(millis());
-  Sim800.reset(SIMPIN);					// lancer SIM800
-  MajHeure("");
+  if (gsm){
+    Sim800.reset(SIMPIN);					// lancer SIM800
+    MajHeure("");
+  }
 
   loopPrincipale = Alarm.timerRepeat(10, Acquisition); // boucle principale 10s
   Alarm.enable(loopPrincipale);
@@ -367,12 +394,11 @@ void setup() {
 
   Serial.print(F("flag Circule :")), Serial.println(flagCircule);
 
-  if(Feux != 0){  // si une valeur Feux different de 0 en memoire RTC, on Allume les feux
+  if (Feux != 0) { // si une valeur Feux different de 0 en memoire RTC, on Allume les feux
     Allumage();
   }
 
   // SelftestFeux();
-
 }
 //---------------------------------------------------------------------------
 void loop() {
@@ -444,7 +470,9 @@ void Acquisition() {
     OuvrirFichierCalibration(); // patch relecture des coeff perdu
   }
 
-  if (!Sim800.getetatSIM())Sim800.reset(SIMPIN); // verification SIM
+  if (gsm) {
+    if (!Sim800.getetatSIM())Sim800.reset(SIMPIN); // verification SIM
+  }
   Serial.print(displayTime(0));
   // Serial.print(F(" Freemem = ")), Serial.println(ESP.getFreeHeap());
   static byte nalaTension = 0;
@@ -453,6 +481,10 @@ void Acquisition() {
   VBatterieProc   = map(adc_mm[1] / nSample, 0, 4095, 0, CoeffTension[1]);
   VUSB            = map(adc_mm[2] / nSample, 0, 4095, 0, CoeffTension[2]);
   Tension24       = map(adc_mm[3] / nSample, 0, 4095, 0, CoeffTension[3]);
+  Lum             = map(adc_mm[4] / nSample, 0 , 4095, 100, 0); // Luminosité 0-100%
+
+  Serial.print("\nluminosité = "), Serial.print(Lum);
+  Serial.print(" lumlut = "), Serial.println(lumlut(Lum));
 
   // Serial.print(adc_mm[0]),Serial.print(";");
   // Serial.print(adc_mm[1]),Serial.print(";");
@@ -465,7 +497,7 @@ void Acquisition() {
     if (cptallume > 2 && Tension24 < 2000) { // on attend 3 passages pour mesurer 24V
       FlagAlarme24V = true;
     }
-    else if(Tension24 > 2100){
+    else if (Tension24 > 2100) {
       FlagAlarme24V = false;
     }
   }
@@ -507,23 +539,24 @@ void Acquisition() {
   message += fl;
   Serial.print(message);
 
-  /* verification nombre SMS en attente(raté en lecture directe)
-  	 traitement des sms en memeoire un par un,
-  	 pas de traitement en serie par commande 51, traitement beaucoup trop long */
-  nsms = Sim800.getNumSms(); // nombre de SMS en attente (1s)
-  Serial.print(F("Sms en attente = ")), Serial.println(nsms);
+  if (gsm) {
+    /* verification nombre SMS en attente(raté en lecture directe)
+       traitement des sms en memoire un par un,
+       pas de traitement en serie par commande 51, traitement beaucoup trop long */
+    nsms = Sim800.getNumSms(); // nombre de SMS en attente (1s)
+    Serial.print(F("Sms en attente = ")), Serial.println(nsms);
 
-  if (nsms > 0) {	// nombre de SMS en attente
-    // il faut les traiter
-    int numsms = Sim800.getIndexSms(); // cherche l'index des sms en mémoire
-    Serial.print(F("Numero Sms en attente = ")), Serial.println(numsms);
-    traite_sms(numsms);// traitement des SMS en attente
+    if (nsms > 0) {	// nombre de SMS en attente
+      // il faut les traiter
+      int numsms = Sim800.getIndexSms(); // cherche l'index des sms en mémoire
+      Serial.print(F("Numero Sms en attente = ")), Serial.println(numsms);
+      traite_sms(numsms);// traitement des SMS en attente
+    }
+    else if (nsms == 0 && FlagReset) { // on verifie que tous les SMS sont traités avant Reset
+      FlagReset = false;
+      ResetHard();				//	reset hard
+    }
   }
-  else if (nsms == 0 && FlagReset) { // on verifie que tous les SMS sont traités avant Reset
-    FlagReset = false;
-    ResetHard();				//	reset hard
-  }
-
   envoie_alarme();
 
   digitalWrite(LED_PIN, 0);
@@ -624,27 +657,27 @@ void Extinction() {
   Allume = false;
   digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
   MajLog(F("Auto"), "Feux = " + String(Feux));
-  envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur 
+  envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
 }
 //---------------------------------------------------------------------------
-void SelftestFeux(){
+void SelftestFeux() {
   digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
   int memFeux = Feux; // memorisation etat Feux
-  for(int i=1;i<5;i++){
+  for (int i = 1; i < 5; i++) {
     Feux = i;
     GestionFeux();
-    if(i==4){
+    if (i == 4) {
+      Alarm.delay(4000);
+    }
+    else {
       Alarm.delay(3000);
     }
-    else{
-      Alarm.delay(2000);
-    }
   }
-  Feux=0;
+  Feux = 0;
   GestionFeux();
   digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
   Feux = memFeux; // restitution etat Feux
-  if(Allume){
+  if (Allume) {
     Allumage(); // retour etat precedent
   }
 }
@@ -798,10 +831,12 @@ fin_tel:
         }
         else {
           Serial.println(Send);
-          Sim800.WritePhoneBook(Send);					//ecriture dans PhoneBook
-          Alarm.delay(500);
-          Sim800.ModeText(); //pour purger buffer fona
-          Alarm.delay(500);
+          if(gsm){
+            Sim800.WritePhoneBook(Send);					//ecriture dans PhoneBook
+            Alarm.delay(500);
+            Sim800.ModeText(); //pour purger buffer fona
+            Alarm.delay(500);
+          }
           messageId();
           message += F("Nouveau Num Tel: ");
           message += F("OK");
@@ -809,7 +844,7 @@ fin_tel:
           EnvoyerSms(number, sms);
         }
       }
-      else if (textesms == F("LST?") || textesms == F("LST1")) {	//	Liste des Num Tel
+      else if (gsm && (textesms == F("LST?") || textesms == F("LST1"))) {	//	Liste des Num Tel
         byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
         for (byte i = 1; i < n + 1; i++) {
           String num = Sim800.getPhoneBookNumber(i);
@@ -839,22 +874,24 @@ fin_i:
         EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("SYS")) > -1) {
-        Sim800.getetatSIM();// 1s
-        byte n = Sim800.getNetworkStatus();// 1.1s
-        String Op = Sim800.getNetworkName();// 1.05s
-        if (n == 5) {
-          message += F(("rmg, "));// roaming 1.0s
+        if(gsm){
+          Sim800.getetatSIM();// 1s
+          byte n = Sim800.getNetworkStatus();// 1.1s
+          String Op = Sim800.getNetworkName();// 1.05s
+          if (n == 5) {
+            message += F(("rmg, "));// roaming 1.0s
+          }
+          message += Op + fl;
+          read_RSSI();
+          int Vbat = Sim800.BattVoltage();
+          byte Batp = Sim800.BattPct();
+         message += F("Batt GSM : ");
+          message += Vbat;
+          message += F(" mV, ");
+          message += Batp;
+          message += F(" %");
+          message += fl;
         }
-        message += Op + fl;
-        read_RSSI();
-        int Vbat = Sim800.BattVoltage();
-        byte Batp = Sim800.BattPct();
-        message += F("Batt GSM : ");
-        message += Vbat;
-        message += F(" mV, ");
-        message += Batp;
-        message += F(" %");
-        message += fl;
         message += F("Ver: ");
         message += ver;
         message += fl;
@@ -932,10 +969,10 @@ fin_i:
       else if (textesms.indexOf(F("MAJHEURE")) == 0) {	//	forcer mise a l'heure
         message += F("Mise a l'heure");
         // Sim800.reset(SIMPIN);// lancer SIM800
-        MajHeure(Sim800.getTimeSms(slot)); // mise a l'heure du sms
+        if (gsm)MajHeure(Sim800.getTimeSms(slot)); // mise a l'heure du sms
         if (nom != F("Moi meme")) EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("IMEI")) > -1) {
+      else if (gsm && textesms.indexOf(F("IMEI")) > -1) {
         message += F("IMEI = ");
         String m = Sim800.getIMEI();
         message += m + fl;
@@ -1153,7 +1190,7 @@ fin_i:
           if (Sbidon.substring(1, 2) == "4" ) {
             Allumage(); // Allumage
             Alarm.delay(500);
-            read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V); // lecture des adc
+            read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V, PinLum); // lecture des adc
             M = 4;
             P = Pin24V;
             coef = CoeffTension[3];
@@ -1232,7 +1269,7 @@ fin_i:
           // message += "non reconnu" + fl;
         }
         generationMessage(0);
-        if(Feux !=0){ // seulement si different de DCV, doublon DCV envoie automatiquement une reponse
+        if (Feux != 0) { // seulement si different de DCV, doublon DCV envoie automatiquement une reponse
           envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
         }
         // EnvoyerSms(number, sms);
@@ -1382,23 +1419,25 @@ void envoie_alarme() {
 }
 //---------------------------------------------------------------------------
 void envoieGroupeSMS(byte grp, bool m) {
-  /* m=0 message normal/finanalyse
-  	si grp = 0,
-    envoie un SMS à tous les numero existant (9 max) du Phone Book
-  	SAUF ceux de la liste restreinte
-    si grp = 1,
-    envoie un SMS à tous les numero existant (9 max) du Phone Book
-    de la liste restreinte config.Pos_Pn_PB[x]=1			*/
+  if (gsm) {
+    /* m=0 message normal/finanalyse
+    	si grp = 0,
+      envoie un SMS à tous les numero existant (9 max) du Phone Book
+    	SAUF ceux de la liste restreinte
+      si grp = 1,
+      envoie un SMS à tous les numero existant (9 max) du Phone Book
+      de la liste restreinte config.Pos_Pn_PB[x]=1			*/
 
-  byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
-  // Serial.print(F("Nombre de ligne PB=")),Serial.println(n);
-  for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
-    if ((grp == 0 && config.Pos_Pn_PB[Index] == 0) || (grp == 1 && config.Pos_Pn_PB[Index] == 1)) {
-      String number = Sim800.getPhoneBookNumber(Index);
-      generationMessage(m);
-      char num[13];
-      number.toCharArray(num, 13);
-      EnvoyerSms(num, true);
+    byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
+    // Serial.print(F("Nombre de ligne PB=")),Serial.println(n);
+    for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
+      if ((grp == 0 && config.Pos_Pn_PB[Index] == 0) || (grp == 1 && config.Pos_Pn_PB[Index] == 1)) {
+        String number = Sim800.getPhoneBookNumber(Index);
+        generationMessage(m);
+        char num[13];
+        number.toCharArray(num, 13);
+        EnvoyerSms(num, true);
+      }
     }
   }
 }
@@ -1481,10 +1520,10 @@ void generationMessage(bool n) {
 //---------------------------------------------------------------------------
 void EnvoyerSms(char *num, bool sms) {
 
-  if (sms) { // envoie sms
+  if (sms && gsm) { // envoie sms
     message.toCharArray(replybuffer, message.length() + 1);
     bool OK = Sim800.sendSms(num, replybuffer);
-    if (OK){
+    if (OK) {
       Serial.print(F("send sms OK:"));
       Serial.println(num);
     }
@@ -1494,88 +1533,92 @@ void EnvoyerSms(char *num, bool sms) {
 }
 //---------------------------------------------------------------------------
 void read_RSSI() {	// lire valeur RSSI et remplir message
-  int r;
-  byte n = Sim800.getRSSI();
-  // Serial.print(F("RSSI = ")); Serial.print(n); Serial.print(F(": "));
-  if (n == 0) r = -115;
-  if (n == 1) r = -111;
-  if (n == 31) r = -52;
-  if ((n >= 2) && (n <= 30)) {
-    r = map(n, 2, 30, -110, -54);
+  if(gsm){
+    int r;
+    byte n = Sim800.getRSSI();
+    // Serial.print(F("RSSI = ")); Serial.print(n); Serial.print(F(": "));
+    if (n == 0) r = -115;
+    if (n == 1) r = -111;
+    if (n == 31) r = -52;
+    if ((n >= 2) && (n <= 30)) {
+      r = map(n, 2, 30, -110, -54);
+    }
+    message += F("RSSI=");
+    message += String(n);
+    message += ", ";
+    message += String(r);
+    message += F("dBm");
+    message += fl;
   }
-  message += F("RSSI=");
-  message += String(n);
-  message += ", ";
-  message += String(r);
-  message += F("dBm");
-  message += fl;
 }
 //---------------------------------------------------------------------------
 void MajHeure(String smsdate) {
-  /*parametrage du SIM800 a faire une fois
-    AT+CLTS? si retourne 0
-    AT+CLTS=1
-    AT+CENG=3
-    AT&W pour sauvegarder ce parametre
-    si AT+CCLK? pas OK
-    avec Fonatest passer en GPRS 'G', envoyer 'Y' la sync doit se faire, couper GPRS 'g'
-    't' ou AT+CCLK? doit donner la date et heure réseau
-    format date retourné par Fona "yy/MM/dd,hh:mm:ss±zz",
-    +CCLK: "14/08/08,02:25:43-16" -16= décalage GMT en n*1/4heures(-4) */
-  if (smsdate.length() > 1) { // si smsdate present mise a l'heure forcé
-    Sim800.SetTime(smsdate);
-  }
-  static bool First = true;
-  int ecart;
-  Serial.print(F("Mise a l'heure reguliere !, "));
-  // setTime(10,10,0,1,1,18);
-  int Nday, Nmonth, Nyear, Nminute, Nsecond, Nhour;
-  Sim800.RTCtime(&Nday, &Nmonth, &Nyear, &Nhour, &Nminute, &Nsecond);
-
-
-  printf("%s %02d/%02d/%d %02d:%02d:%02d\n", "MajH1", Nday, Nmonth, Nyear, Nhour, Nminute, Nsecond);
-  long debut = millis();
-  if (First || Nyear < 17) {
-    while (Nyear < 17) {
-      Sim800.RTCtime(&Nday, &Nmonth, &Nyear, &Nhour, &Nminute, &Nsecond);
-      printf("%s %02d/%02d/%d %02d:%02d:%02d\n", "MajH2", Nday, Nmonth, Nyear, Nhour, Nminute, Nsecond);
-      Alarm.delay(1000);
-      // if (millis() - debut > 10000) {// supprimé risque de deconnexion reseau plus de redemarage
-      // Sim800.setPhoneFunctionality(0);
-      // Alarm.delay(1000);
-      // Sim800.setPhoneFunctionality(1);
-      // Alarm.delay(1000);
-      // }
-      if (millis() - debut > 15000) {
-        Serial.println(F("Impossible de mettre à l'heure !"));
-        //on s'envoie à soi même un SMS "MAJHEURE"
-        message = F("MAJHEURE");
-        char numchar[13];
-        String numstring = Sim800.getNumTel();
-        numstring.toCharArray(numchar, 13);
-        EnvoyerSms(numchar, true);
-        break;
-      }
+  if(gsm){
+    /*parametrage du SIM800 a faire une fois
+      AT+CLTS? si retourne 0
+      AT+CLTS=1
+      AT+CENG=3
+      AT&W pour sauvegarder ce parametre
+      si AT+CCLK? pas OK
+      avec Fonatest passer en GPRS 'G', envoyer 'Y' la sync doit se faire, couper GPRS 'g'
+      't' ou AT+CCLK? doit donner la date et heure réseau
+      format date retourné par Fona "yy/MM/dd,hh:mm:ss±zz",
+      +CCLK: "14/08/08,02:25:43-16" -16= décalage GMT en n*1/4heures(-4) */
+    if (smsdate.length() > 1) { // si smsdate present mise a l'heure forcé
+      Sim800.SetTime(smsdate);
     }
-    setTime(Nhour, Nminute, Nsecond, Nday, Nmonth, Nyear);
-    First = false;
-  }
-  else {
-    //  calcul décalage entre H sys et H reseau en s
-    ecart = (Nhour - hour()) * 3600;
-    ecart += (Nminute - minute()) * 60;
-    ecart += Nsecond - second();
-    // ecart += 10;
-    Serial.print(F("Ecart s= ")), Serial.println(ecart);
-    if (abs(ecart) > 5) {
-      // ArretSonnerie();	// Arret Sonnerie propre
-      Alarm.disable(loopPrincipale);
-      Alarm.disable(FinJour);
+    static bool First = true;
+    int ecart;
+    Serial.print(F("Mise a l'heure reguliere !, "));
+    // setTime(10,10,0,1,1,18);
+    int Nday, Nmonth, Nyear, Nminute, Nsecond, Nhour;
+    Sim800.RTCtime(&Nday, &Nmonth, &Nyear, &Nhour, &Nminute, &Nsecond);
 
+
+    printf("%s %02d/%02d/%d %02d:%02d:%02d\n", "MajH1", Nday, Nmonth, Nyear, Nhour, Nminute, Nsecond);
+    long debut = millis();
+    if (First || Nyear < 17) {
+      while (Nyear < 17) {
+        Sim800.RTCtime(&Nday, &Nmonth, &Nyear, &Nhour, &Nminute, &Nsecond);
+        printf("%s %02d/%02d/%d %02d:%02d:%02d\n", "MajH2", Nday, Nmonth, Nyear, Nhour, Nminute, Nsecond);
+        Alarm.delay(1000);
+        // if (millis() - debut > 10000) {// supprimé risque de deconnexion reseau plus de redemarage
+        // Sim800.setPhoneFunctionality(0);
+        // Alarm.delay(1000);
+        // Sim800.setPhoneFunctionality(1);
+        // Alarm.delay(1000);
+        // }
+        if (millis() - debut > 15000) {
+          Serial.println(F("Impossible de mettre à l'heure !"));
+          //on s'envoie à soi même un SMS "MAJHEURE"
+          message = F("MAJHEURE");
+          char numchar[13];
+          String numstring = Sim800.getNumTel();
+          numstring.toCharArray(numchar, 13);
+          EnvoyerSms(numchar, true);
+          break;
+        }
+      }
       setTime(Nhour, Nminute, Nsecond, Nday, Nmonth, Nyear);
+      First = false;
+    }
+    else {
+      //  calcul décalage entre H sys et H reseau en s
+      ecart = (Nhour - hour()) * 3600;
+      ecart += (Nminute - minute()) * 60;
+      ecart += Nsecond - second();
+      // ecart += 10;
+      Serial.print(F("Ecart s= ")), Serial.println(ecart);
+      if (abs(ecart) > 5) {
+        // ArretSonnerie();	// Arret Sonnerie propre
+        Alarm.disable(loopPrincipale);
+        Alarm.disable(FinJour);
 
-      Alarm.enable(loopPrincipale);
-      Alarm.enable(FinJour);
+        setTime(Nhour, Nminute, Nsecond, Nday, Nmonth, Nyear);
+
+        Alarm.enable(loopPrincipale);
+        Alarm.enable(FinJour);
+      }
     }
   }
   displayTime(0);
@@ -1607,9 +1650,11 @@ long HActuelledec() {
 //---------------------------------------------------------------------------
 void SignalVie() {
   Serial.println(F("Signal vie"));
-  MajHeure("");
-  envoieGroupeSMS(0, 0);
-  Sim800.delAllSms();// au cas ou, efface tous les SMS envoyé/reçu
+  if (gsm) {
+    MajHeure("");
+    envoieGroupeSMS(0, 0);
+    Sim800.delAllSms();// au cas ou, efface tous les SMS envoyé/reçu
+  }
 }
 //---------------------------------------------------------------------------
 void sauvConfig() { // sauve configuration en EEPROM
@@ -1761,20 +1806,24 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
     message += F("Fichier log presque plein\n");
     message += String(f.size());
     message += F("\nFichier sera efface a 300000");
-    String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
-    char num[13];
-    number.toCharArray(num, 13);
-    EnvoyerSms(num, true);
+    if(gsm){
+      String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
+      char num[13];
+      number.toCharArray(num, 13);
+      EnvoyerSms(num, true);
+    }
   }
   else if (f.size() > 300000 && FileLogOnce) { // 292Ko 75000 lignes
     messageId();
     message += F("Fichier log plein\n");
     message += String(f.size());
     message += F("\nFichier efface");
-    String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
-    char num[13];
-    number.toCharArray(num, 13);
-    EnvoyerSms(num, true);
+    if(gsm){
+      String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
+      char num[13];
+      number.toCharArray(num, 13);
+      EnvoyerSms(num, true);
+    }
     SPIFFS.remove(filelog);
     FileLogOnce = false;
   }
@@ -1807,6 +1856,48 @@ void EnregistreCalendrier() { // remplace le nouveau calendrier
     Sbidon = "";
   }
 
+}
+//---------------------------------------------------------------------------
+void OuvrirLumLUT() {
+  if (SPIFFS.exists(filelumlut)) {
+    File f = SPIFFS.open(filelumlut, "r");
+    for (int i = 0; i < 11; i++) { //Read 11 lignes
+      String s = f.readStringUntil('\n');
+      int pos = s.indexOf(",");
+      TableLum[i][0] = s.substring(0, pos).toInt();
+      TableLum[i][1] = s.substring(pos + 1, s.length() ).toInt();
+    }
+    f.close();
+  }
+  else {
+    Serial.println("Fichier LumLUT n'existe pas, creation val par defaut");
+    char bid[9];
+    for (int i = 0; i < 11; i++) {
+      int v2;
+      int v1 = 100 - i * 10;
+      if (i < 10) {
+        v2 = v1;
+      }
+      else {
+        v2 = 10;
+      }
+      sprintf(bid, "%d,%d\n", v1, v2);
+      appendFile(SPIFFS, filelumlut, bid);
+    }
+  }
+  for (int i = 0; i < 11 ; i++) {
+    Serial.print(TableLum[i][0]), Serial.print(","), Serial.println(TableLum[i][1]);
+  }
+}
+//---------------------------------------------------------------------------
+int lumlut(int l) {
+  // retourn la valeur lut en fonction de lum actuelle
+  for (int i = 0; i < 11; i++) {
+    if (l > TableLum[i][0]) {
+      return TableLum[i][1];;
+    }
+  }
+  return 0;
 }
 //---------------------------------------------------------------------------
 void OuvrirCalendrier() {
@@ -1854,6 +1945,7 @@ void FinJournee() {
   jour = false;
   flagCircule = false;
   FirstWakeup = true;
+  digitalWrite(PinAlimLum , LOW); // couper alimentation LDR
   Serial.println(F("Fin de journee retour sleep"));
   TIME_TO_SLEEP = DureeSleep(config.DebutJour - config.anticip);// xx mn avant
   Sbidon  = F("FinJour, sleep for ");
@@ -2147,7 +2239,7 @@ void DebutSleep() {
   Serial.println(Hdectohhmm(TIME_TO_SLEEP));
   Serial.flush();
 
-  if(TIME_TO_SLEEP == 1){
+  if (TIME_TO_SLEEP == 1) {
     Serial.println(F("pas de sleep on continue"));
     return;
   }
@@ -2155,9 +2247,11 @@ void DebutSleep() {
   Serial.println(F("Going to sleep now"));
 
   byte i = 0;
-  while (!Sim800.sleep()) {
-    Alarm.delay(100);
-    if (i++ > 10) break;
+  if(gsm){
+    while (!Sim800.sleep()) {
+      Alarm.delay(100);
+      if (i++ > 10) break;
+    }
   }
   Serial.flush();
   esp_deep_sleep_start();
@@ -2342,33 +2436,37 @@ void init_adc_mm(void) {
   unsigned int ini_adc2 = 0;// val defaut adc 2
   unsigned int ini_adc3 = 0;// val defaut adc 3
   unsigned int ini_adc4 = 0;// val defaut adc 4
+  unsigned int ini_adc5 = 0;// val defaut adc 5
   for (int plus_ancien = 0; plus_ancien < nSample; plus_ancien++) {
     adc_hist[0][plus_ancien] = ini_adc1;
     adc_hist[1][plus_ancien] = ini_adc2;
     adc_hist[2][plus_ancien] = ini_adc3;
     adc_hist[3][plus_ancien] = ini_adc4;
+    adc_hist[4][plus_ancien] = ini_adc5;
   }
   //on commencera à stocker à cet offset
   adc_mm[0] = ini_adc1;
   adc_mm[1] = ini_adc2;
   adc_mm[2] = ini_adc3;
   adc_mm[3] = ini_adc4;
+  adc_mm[4] = ini_adc5;
 }
 //---------------------------------------------------------------------------
 void adc_read() {
-  read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V); // lecture des adc
+  read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V, PinLum); // lecture des adc
 }
 //---------------------------------------------------------------------------
-void read_adc(int pin1, int pin2, int pin3, int pin4) {
+void read_adc(int pin1, int pin2, int pin3, int pin4, int pin5) {
   // http://www.f4grx.net/algo-comment-calculer-une-moyenne-glissante-sur-un-microcontroleur-a-faibles-ressources/
   static int plus_ancien = 0;
   //acquisition
-  int sample[4];
-  for (byte i = 0; i < 4; i++) {
+  int sample[5];
+  for (byte i = 0; i < 5; i++) {
     if (i == 0)sample[i] = moyenneAnalogique(pin1);
     if (i == 1)sample[i] = moyenneAnalogique(pin2);
     if (i == 2)sample[i] = moyenneAnalogique(pin3);
     if (i == 3)sample[i] = moyenneAnalogique(pin4);
+    if (i == 4)sample[i] = moyenneAnalogique(pin5);
 
     //calcul MoyenneMobile
     adc_mm[i] = adc_mm[i] + sample[i] - adc_hist[i][plus_ancien];
@@ -2498,21 +2596,23 @@ void Tel_listPage() {
   webpage += F("<th> Num&eacute;ro </th>");
   webpage += F("<th> Liste restreinte </th>");
   webpage += F("</tr>");
-  byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
-  for (byte i = 1; i < n + 1; i++) {
-    String num = Sim800.getPhoneBookNumber(i);
-    // Serial.print(num.length()), Serial.print(" "), Serial.println(num);
-    if (num.indexOf("+CPBR:") == 0) { // si existe pas sortir
-      Serial.println(F("Failed!"));// next i
-      goto fin_liste;
+  if(gsm){
+    byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
+    for (byte i = 1; i < n + 1; i++) {
+      String num = Sim800.getPhoneBookNumber(i);
+      // Serial.print(num.length()), Serial.print(" "), Serial.println(num);
+      if (num.indexOf("+CPBR:") == 0) { // si existe pas sortir
+        Serial.println(F("Failed!"));// next i
+        goto fin_liste;
+      }
+      String name = Sim800.getPhoneBookName(i);
+      // Serial.println(name);
+      webpage += F("<tr>");
+      webpage += F("<td>"); webpage += name; webpage += F("</td>");
+      webpage += F("<td>"); webpage += num ; webpage += F("</td>");
+      webpage += F("<td>"); webpage += String(config.Pos_Pn_PB[i]); webpage += F("</td>");
+      webpage += F("</tr>");
     }
-    String name = Sim800.getPhoneBookName(i);
-    // Serial.println(name);
-    webpage += F("<tr>");
-    webpage += F("<td>"); webpage += name; webpage += F("</td>");
-    webpage += F("<td>"); webpage += num ; webpage += F("</td>");
-    webpage += F("<td>"); webpage += String(config.Pos_Pn_PB[i]); webpage += F("</td>");
-    webpage += F("</tr>");
   }
 fin_liste:
 
