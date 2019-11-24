@@ -37,7 +37,9 @@
 
   mode normal
   SIM800 en reception
-  entree coffret, BP local demand Blanc Cli1 sur interruption ESP32
+  entrees externes,
+  Ip1 local demande Blanc Cli1 sur interruption ESP32
+  Ip2 a definir
 
   Surveillance Batterie solaire
 	Adc interne instable 2 à 3.5% erreurs!
@@ -103,8 +105,9 @@ bool    SPIFFS_present = false;
 #define PinBattProc   35   // liaison interne carte Lolin32 adc
 #define PinBattSol    39   // Batterie générale 12V adc VN
 #define PinBattUSB    36   // V USB 5V adc VP 36, 25 ADC2 pas utilisable avec Wifi
-#define PinBp         32   // Entrée Bp Wake up EXT1
-#define Pin24V        33   // Mesure Tension 24V
+#define PinIp1        32   // Entrée Ip1 Wake up EXT1
+#define PinIp2        33   // Entrée Ip2 Wake up EXT1 fonction reserve
+#define Pin24V        26   // Mesure Tension 24V
 #define PinFBlc       21   // Sortie Commande Feux Blanc
 #define PinConvert    19   // Sortie Commande Convertisseur 12/24V
 #define PinFVlt       15   // Sortie Commande Feux Violet
@@ -114,6 +117,7 @@ bool    SPIFFS_present = false;
 #define PinLum        34   // Mesure Luminosité
 #define PinAlimLum    25   // Alimentation LDR
 #define PinTest       27   // Test sans GSM cc a la masse
+
 #define SIMPIN        1234 // Code PIN carte SIM
 
 #define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
@@ -132,8 +136,8 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V0-0.5";
-int    Magique    = 0007;
+String ver        = "V0-0.6";
+int    Magique    = 0008;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -142,8 +146,10 @@ String fl = "\n";                   //  saut de ligne SMS
 String Id ;                         //  Id du materiel sera lu dans EEPROM
 char   SIM800InBuffer[64];          //  for notifications from the SIM800
 char   replybuffer[255];            //  Buffer de reponse SIM800
-volatile int IRQ_Cpt_Bp  = 0;
+volatile int IRQ_Cpt_Ip1  = 0;      //  IRQ Ip1
+volatile int IRQ_Cpt_Ip2  = 0;      //  IRQ Ip2
 volatile unsigned long rebond1 = 0; //	antirebond IRQ
+volatile unsigned long rebond2 = 0; //	antirebond IRQ
 byte DbounceTime = 20;              // antirebond
 byte confign = 0;                   // position enregistrement config EEPROM
 byte recordn = 100;                 // position enregistrement log EEPROM
@@ -163,7 +169,8 @@ RTC_DATA_ATTR bool FileLogOnce             = false; // true si log > seuil alert
 
 bool FlagAlarme24V           = false; // Alarme tension 24V Allumage
 bool FlagLastAlarme24V       = false;
-bool FlagBp                  = false; // Bp local enfoncé
+bool FlagIp1                 = false; // Entrée 1 activée
+bool FlagIp2                 = false; // Entrée 2 activée
 bool FlagReset = false;       // Reset demandé
 bool jour      = false;				// jour = true, nuit = false
 bool gsm       = true;        // carte GSM presente utilisé pour test sans GSM seulement
@@ -201,7 +208,8 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   long    FinJour;         // Heure fin jour, 20h matin en seconde = 20*60*60
   long    RepeatWakeUp;    // Periodicité WakeUp Jour non circulé
   int     timeoutWifi;     // tempo coupure Wifi si pas de mise a jour (s)
-  bool    Bp;              // Bp Actif
+  bool    Ip1;             // E1 Actif
+  bool    Ip2;             // E2 Actif
   int     SlowBlinker;     // ms
   int     FastBlinker;
   int     FastRater;
@@ -226,15 +234,24 @@ HardwareSerial *SIM800Serial = &Serial2;// liaison serie FONA SIM800
 Sim800l Sim800;  											// to declare the library
 
 //---------------------------------------------------------------------------
-void IRAM_ATTR handleInterruptBp() { // Bouton Poussoir
+void IRAM_ATTR handleInterruptIp1() { // Entrée 1
 
   portENTER_CRITICAL_ISR(&mux);
   if (xTaskGetTickCount() - rebond1 > DbounceTime) {
-    IRQ_Cpt_Bp++;
+    IRQ_Cpt_Ip1++;
     rebond1 = xTaskGetTickCount(); // equiv millis()
   }
   portEXIT_CRITICAL_ISR(&mux);
 
+}
+void IRAM_ATTR handleInterruptIp2() { // Entrée 2
+
+  portENTER_CRITICAL_ISR(&mux);
+  if (xTaskGetTickCount() - rebond2 > DbounceTime) {
+    IRQ_Cpt_Ip2++;
+    rebond2 = xTaskGetTickCount(); // equiv millis()
+  }
+  portEXIT_CRITICAL_ISR(&mux);
 }
 //---------------------------------------------------------------------------
 
@@ -245,7 +262,8 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   
-  pinMode(PinBp      , INPUT_PULLUP);
+  pinMode(PinIp1     , INPUT_PULLUP);
+  pinMode(PinIp2     , INPUT_PULLUP);
   pinMode(PinFBlc    , OUTPUT);
   pinMode(PinFVlt    , OUTPUT);
   pinMode(PinConvert , OUTPUT);
@@ -304,7 +322,8 @@ void setup() {
     config.FinJour       = 19 * 60 * 60;
     config.RepeatWakeUp  = 60 * 60;
     config.timeoutWifi   = 10 * 60;
-    config.Bp            = false;
+    config.Ip1           = false;
+    config.Ip2           = false;
     config.SlowBlinker   = 500;
     config.FastBlinker   = 150;
     config.FastRater     = 1000;
@@ -405,6 +424,7 @@ void loop() {
   recvOneChar();
 
   if (rebond1 > millis()) rebond1 = millis();
+  if (rebond2 > millis()) rebond2 = millis();
 
   char* bufPtr = SIM800InBuffer;	//buffer pointer
   if (Serial2.available()) {      	//any data available from the FONA?
@@ -432,18 +452,18 @@ void loop() {
     }
   }
 
-  if (IRQ_Cpt_Bp > 0 && config.Bp) {
+  if (IRQ_Cpt_Ip1 > 0 && config.Ip1) {
     Serial.print(F("Interruption : "));
-    Serial.println(IRQ_Cpt_Bp);
+    Serial.println(IRQ_Cpt_Ip1);
     Feux = 3; // Violet 0, Blanc Manoeuvre Cli lent
     MajLog("Manuel", "Bp local");
     Allumage();
-    if (!FlagBp) {
-      FlagBp = true;
+    if (!FlagIp1) {
+      FlagIp1 = true;
       envoieGroupeSMS(0, 0);			// envoie groupé
     }
     portENTER_CRITICAL(&mux);
-    IRQ_Cpt_Bp = 0;
+    IRQ_Cpt_Ip1 = 0;
     portEXIT_CRITICAL(&mux);
   }
 
@@ -777,6 +797,7 @@ void traite_sms(byte slot) {
         String pwds  = textesms.substring(pos2 + 1, textesms.length());
         char ssid[20];
         char pwd[20];
+        ssids.toCharArray(ssid, ssids.length() + 1);
         ssids.toCharArray(ssid, ssids.length() + 1);
         pwds.toCharArray(pwd, pwds.length() + 1);
         ConnexionWifi(ssid, pwd, number, sms); // message généré par routine
@@ -1355,29 +1376,29 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("BPACTIF")) == 0) {
+      else if (textesms.indexOf(F("E1ACTIVE")) == 0) {
         if (textesms.substring(7, 8) == "=") {
           if (textesms.substring(8, 9) == "1") {
-            if (!config.Bp) {
-              config.Bp = true;
+            if (!config.Ip1) {
+              config.Ip1 = true;
               sauvConfig();
               ActiveInterrupt();
             }
           }
           else if (textesms.substring(8, 9) == "0") {
-            if (config.Bp) {
-              config.Bp = false;
+            if (config.Ip1) {
+              config.Ip1 = false;
               sauvConfig();
               DesActiveInterrupt();
             }
           }
         }
-        message += "Bouton poussoir local ";
-        if (config.Bp) {
-          message += "Actif";
+        message += "Entrée 1 ";
+        if (config.Ip1) {
+          message += "Active";
         }
         else {
-          message += "InActif";
+          message += "InActive";
         }
         message += fl;
         EnvoyerSms(number, sms);
@@ -1453,10 +1474,10 @@ void generationMessage(bool n) {
     message += F("-------OK-------");
   }
   message += fl;
-  if (FlagBp) {
+  if (FlagIp1) {
     message += "Commande locale";
     message += fl;
-    FlagBp = false;
+    FlagIp1 = false;
   }
   // message += "Allumage = ";
   // message += Allume;
@@ -1964,7 +1985,8 @@ void PrintEEPROM() {
   Serial.print(F("T anticipation Wakeup = "))   , Serial.println(config.anticip);
   Serial.print(F("Tempo repetition Wake up (s)= ")), Serial.println(config.RepeatWakeUp);
   Serial.print(F("Time Out Wifi (s)= "))        , Serial.println(config.timeoutWifi);
-  Serial.print(F("Bouton poussoir Actif = "))   , Serial.println(config.Bp);
+  Serial.print(F("Entrée Externe 1 Active = ")) , Serial.println(config.Ip1);
+  Serial.print(F("Entrée Externe 2 Active = ")) , Serial.println(config.Ip2);
   Serial.print(F("Vitesse SlowBlinker = "))     , Serial.println(config.SlowBlinker);
   Serial.print(F("Vitesse FastBlinker = "))     , Serial.println(config.FastBlinker);
   Serial.print(F("Vitesse RepetFastBlinker = ")), Serial.println(config.FastRater);
@@ -2167,14 +2189,20 @@ String Hdectohhmm(long Hdec) {
 }
 //---------------------------------------------------------------------------
 void DesActiveInterrupt() {
-  // if (config.Bp) {
-  detachInterrupt(digitalPinToInterrupt(PinBp));
-  // }
+  if (config.Ip1) {
+  detachInterrupt(digitalPinToInterrupt(PinIp1));
+  }
+  if (config.Ip2) {
+  detachInterrupt(digitalPinToInterrupt(PinIp2));
+  }
 }
 //---------------------------------------------------------------------------
 void ActiveInterrupt() {
-  if (config.Bp) {
-    attachInterrupt(digitalPinToInterrupt(PinBp), handleInterruptBp, FALLING);
+  if (config.Ip1) {
+    attachInterrupt(digitalPinToInterrupt(PinIp1), handleInterruptIp1, FALLING);
+  }
+  if (config.Ip2) {
+    attachInterrupt(digitalPinToInterrupt(PinIp2), handleInterruptIp2, FALLING);
   }
 }
 //---------------------------------------------------------------------------
@@ -2551,12 +2579,23 @@ void HomePage() {
   webpage += F("</tr>");
 
   webpage += F("<tr>");
-  webpage += F("<td>Bouton Poussoir local</td>");
+  webpage += F("<td>Entr&eacute;e 1</td>");
   webpage += F("<td>");
-  if (config.Bp) {
-    webpage += F("Actif");
+  if (config.Ip1) {
+    webpage += F("Active");
   } else {
-    webpage += F("Inactif");
+    webpage += F("Inactive");
+  }
+  webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>Entr&eacute;e 2</td>");
+  webpage += F("<td>");
+  if (config.Ip2) {
+    webpage += F("Active");
+  } else {
+    webpage += F("Inactive");
   }
   webpage += F("</td>");
   webpage += F("</tr>");
