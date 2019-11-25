@@ -74,7 +74,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 980930 74%, 47496 14% sur PC
+  Arduino IDE 1.8.10 : 983802 75%, 47680 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -137,7 +137,7 @@ char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
 String ver        = "V0-0.6";
-int    Magique    = 0008;
+int    Magique    = 8;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -301,7 +301,7 @@ void setup() {
   ledcWrite(BlcPwmChanel, 0); // Feux Blanc 0
 
   init_adc_mm();// initialisation tableau pour adc Moyenne Mobile
-  ADC.attach_ms(100, adc_read);
+  ADC.attach_ms(100, adc_read); // lecture des adc toute les 100ms
   /* Lecture configuration en EEPROM	 */
   EEPROM.begin(512);
 
@@ -594,6 +594,7 @@ void GestionFeux() {
       ledcWrite(BlcPwmChanel, 0);
       digitalWrite(PinFVlt, LOW);
       digitalWrite(PinFBlc, LOW);
+      digitalWrite(PinAlimLum, LOW); // extinction Alim LDR
       SlowBlink.detach();
       FastBlink.detach();
       FastRate.detach();
@@ -603,6 +604,7 @@ void GestionFeux() {
       ledcWrite(VltPwmChanel, 255 * config.FVltPWM / 100);
       ledcWrite(BlcPwmChanel, 0);
       digitalWrite(PinFBlc, LOW);
+      digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
       SlowBlink.detach();
       FastBlink.detach();
       FastRate.detach();
@@ -611,6 +613,7 @@ void GestionFeux() {
       Serial.println("Feux Blanc");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 255 * config.FBlcPWM / 100);
+      digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
       SlowBlink.detach();
       FastBlink.detach();
       FastRate.detach();
@@ -619,6 +622,7 @@ void GestionFeux() {
       Serial.println("Feux Blc Clignotant lent");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
       digitalWrite(PinFVlt, LOW);
       FastBlink.detach();
       FastRate.detach();
@@ -628,6 +632,7 @@ void GestionFeux() {
       Serial.println("Feux Blc Clignotant rapide");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
       digitalWrite(PinFVlt, LOW);
       digitalWrite(PinFBlc, LOW);
       SlowBlink.detach();
@@ -1014,6 +1019,56 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
+      else if(textesms.indexOf(F("LUMLUT")) == 0){ // Luminosité Look Up Table
+        // format valeur de luminosité Feux pour chaque valeur luminosite ambiante 
+        // de 100 à 0 pas de 10
+        // LUMLUT=100,90,80,70,60,50,40,30,20,10,10
+        bool flag = true; // validation du format
+        byte nv = 0; // compteur virgule
+        byte p1 = 0; // position virgule
+        Serial.print("pos="),Serial.println(textesms.indexOf(char(61)));
+        if ((textesms.indexOf(char(61))) == 6) {          
+          Sbidon = textesms.substring(7,textesms.length());
+          for(int i = 0; i < Sbidon.length(); i++){
+            p1 = Sbidon.indexOf(char(44),p1+1); // ,
+            if((p1 > 0 && p1 < 255)){
+              nv ++;
+              if(nv == 10)break;
+            }
+            else{
+              flag = false;              
+            }
+            // Serial.printf("%s%d,%s%d\n","p1=",p1,"flag=",flag);
+          }
+          // Serial.print("flag="),Serial.println(flag);
+        }
+        if(flag){ // format ok
+          p1 = 0;
+          byte p2 = 0;
+          for(int i = 0;i < 11;i++){
+            p2 = Sbidon.indexOf(char(44),p1+1); // ,
+            TableLum[i][1] = Sbidon.substring(p1, p2).toInt();
+            // Serial.printf("%s%d,%s%d\n","p1=",p1,"p2=",p2);
+            p1 = p2 + 1;
+            TableLum[i][0] = 100 - i * 10;
+            if(!(TableLum[i][1] >=0 && TableLum[i][1] < 101)) flag = false;
+            // Serial.printf("%03d,%03d\n",TableLum[i][0],TableLum[i][1]);            
+          }
+        }
+        if(flag){// données OK on enregistre
+          EnregistreLumLUT();
+        }
+        else{ // données KO on enregistre pas, et on relie les donnéesnen mémoire
+          OuvrirLumLUT();
+        }
+        message += F("Table Luminosite (%)\n");
+        char bid[9];
+        for(int i = 0; i < 11; i++){
+          sprintf(bid,"%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
+          message += String(bid);
+        }
+        EnvoyerSms(number, sms);
+      }
       else if (textesms.indexOf(F("MOIS")) == 0) { // Calendrier pour un mois
         /* mise a jour calendrier ;format : MOIS=mm,31 fois 0/1
           demande calendrier pour un mois donné ; format : MOIS=mm? */
@@ -1210,8 +1265,10 @@ fin_i:
           }
           if (Sbidon.substring(1, 2) == "4" ) {
             Allumage(); // Allumage
-            Alarm.delay(500);
-            read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V, PinLum); // lecture des adc
+            for(int i = 0; i < 5 ; i++){
+              read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V, PinLum); // lecture des adc
+              Alarm.delay(100);
+            }
             M = 4;
             P = Pin24V;
             coef = CoeffTension[3];
@@ -1860,7 +1917,7 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
   appendFile(SPIFFS, filelog, Cbidon);
 }
 //---------------------------------------------------------------------------
-void EnregistreCalendrier() { // remplace le nouveau calendrier
+void EnregistreCalendrier() { // remplace le calendrier
 
   SPIFFS.remove(filecalendrier);
   Sbidon = "";
@@ -1876,7 +1933,15 @@ void EnregistreCalendrier() { // remplace le nouveau calendrier
     appendFile(SPIFFS, filecalendrier, bid);
     Sbidon = "";
   }
-
+}
+//---------------------------------------------------------------------------
+void EnregistreLumLUT(){
+  SPIFFS.remove(filelumlut);
+  char bid[9];
+  for (int i = 0; i < 11; i++) {
+    sprintf(bid, "%d,%d\n", TableLum[i][0], TableLum[i][1]);
+    appendFile(SPIFFS, filelumlut, bid);
+  }
 }
 //---------------------------------------------------------------------------
 void OuvrirLumLUT() {
@@ -1904,6 +1969,8 @@ void OuvrirLumLUT() {
       }
       sprintf(bid, "%d,%d\n", v1, v2);
       appendFile(SPIFFS, filelumlut, bid);
+      TableLum[i][0]=v1;
+      TableLum[i][1]=v2;
     }
   }
   for (int i = 0; i < 11 ; i++) {
@@ -2041,6 +2108,7 @@ void ConnexionWifi(char* ssid, char* pwd, char* number, bool sms) {
     server.on("/dir",      SPIFFS_dir);
     server.on("/cal",      CalendarPage);
     server.on("/Tel_list", Tel_listPage);
+    server.on("/LumLUT",   LumLUTPage);
     server.on("/timeremaining", handleTime); // renvoie temps restant sur demande
     server.on("/datetime", handleDateTime); // renvoie Date et Heure
     server.on("/wifioff",  WifiOff);
@@ -2620,7 +2688,28 @@ void HomePage() {
   webpage += F("<a href='/dir'><button>Directory</button></a>");
   webpage += F("<a href='/Tel_list'><button>Tel_list</button></a>");
   webpage += F("<a href='/cal'><button>Calendar</button></a>");
+  webpage += F("<a href='/LumLUT'><button>LumLUT</button></a>");
   webpage += F("<a href='/wifioff'><button>Wifi Off</button></a>");
+  append_page_footer();
+  SendHTML_Content();
+  SendHTML_Stop(); // Stop is needed because no content length was sent
+}
+//---------------------------------------------------------------------------
+void LumLUTPage(){
+  SendHTML_Header();
+  webpage += F("<h3 class='rcorners_m'>Table Luminosit&eacute;</h3><br>");
+  webpage += F("<table align='center'>");
+  webpage += F("<tr>");
+  webpage += F("<th> Lum Ambiante % </th>");
+  webpage += F("<th> Lum Feux %</th>");
+  webpage += F("</tr>");
+  for(int i = 0; i < 11; i++){
+    webpage += F("<tr>");
+    webpage += F("<td>"); webpage += TableLum[i][0] ; webpage += F("</td>");
+    webpage += F("<td>"); webpage += TableLum[i][1] ; webpage += F("</td>");
+    webpage += F("</tr>");
+  }
+  webpage += F("</table><br>");
   append_page_footer();
   SendHTML_Content();
   SendHTML_Stop(); // Stop is needed because no content length was sent
