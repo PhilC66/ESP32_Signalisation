@@ -74,7 +74,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 983802 75%, 47680 14% sur PC
+  Arduino IDE 1.8.10 : 985050 75%, 47680 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -136,8 +136,8 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V0-0.6";
-int    Magique    = 8;
+String ver        = "V0-0.7";
+int    Magique    = 10;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -211,12 +211,13 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   bool    Ip1;             // E1 Actif
   bool    Ip2;             // E2 Actif
   int     SlowBlinker;     // ms
-  int     FastBlinker;
-  int     FastRater;
+  int     FastBlinker;     // ms
+  int     FastRater;       // ms
   int     FVltPWM;         // Modulation Feux Violet %
   int     FBlcPWM;         // Modulation Feux Blanc %
   bool    Pos_Pn_PB[10];   // numero du Phone Book (1-9) à qui envoyer 0/1 0 par defaut
-  char 		Idchar[11];			// Id
+  bool    LumAuto;         // luminosité Auto=true
+  char    Idchar[11];      // Id
 } ;
 config_t config;
 
@@ -329,6 +330,7 @@ void setup() {
     config.FastRater     = 1000;
     config.FBlcPWM       = 75;
     config.FVltPWM       = 75;
+    config.LumAuto       = true;
     for (int i = 0; i < 10; i++) {// initialise liste PhoneBook liste restreinte
       config.Pos_Pn_PB[i] = 0;
     }
@@ -506,6 +508,11 @@ void Acquisition() {
   Serial.print("\nluminosité = "), Serial.print(Lum);
   Serial.print(" lumlut = "), Serial.println(lumlut(Lum));
 
+  // en cas de feux fixe rafraichissement commande en fonction lum
+  // les feux M et S sont automatiquement ajusté par blink
+  if(Feux == 1) Update_FVlt(); // Violet
+  if(Feux == 2) Update_FBlc(); // Blanc
+
   // Serial.print(adc_mm[0]),Serial.print(";");
   // Serial.print(adc_mm[1]),Serial.print(";");
   // Serial.println(adc_mm[2]);
@@ -601,7 +608,7 @@ void GestionFeux() {
       break;
     case 1: // Violet 1, Blanc 0
       Serial.println("Feux Violet");
-      ledcWrite(VltPwmChanel, 255 * config.FVltPWM / 100);
+      Update_FVlt();
       ledcWrite(BlcPwmChanel, 0);
       digitalWrite(PinFBlc, LOW);
       digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
@@ -612,7 +619,7 @@ void GestionFeux() {
     case 2: // Violet 0, Blanc 1
       Serial.println("Feux Blanc");
       ledcWrite(VltPwmChanel, 0);
-      ledcWrite(BlcPwmChanel, 255 * config.FBlcPWM / 100);
+      Update_FBlc();
       digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
       SlowBlink.detach();
       FastBlink.detach();
@@ -663,8 +670,26 @@ void blink() {
     ledcWrite(BlcPwmChanel, 0);
     blinker = false;
   } else {
-    ledcWrite(BlcPwmChanel, 255 * config.FBlcPWM / 100);
+    Update_FBlc();
     blinker = true;
+  }
+}
+//---------------------------------------------------------------------------
+void Update_FVlt(){
+  if(config.LumAuto){
+    ledcWrite(VltPwmChanel, 255 * lumlut(Lum) / 100);
+  }
+  else {
+    ledcWrite(VltPwmChanel, 255 * config.FVltPWM / 100);
+  }
+}
+//---------------------------------------------------------------------------
+void Update_FBlc(){
+  if(config.LumAuto){
+    ledcWrite(BlcPwmChanel, 255 * lumlut(Lum) / 100);
+  }
+  else {
+    ledcWrite(BlcPwmChanel, 255 * config.FBlcPWM / 100);
   }
 }
 //---------------------------------------------------------------------------
@@ -1019,6 +1044,38 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
+      else if (textesms.indexOf(F("LUMACTUELLE")) == 0){
+        message += F("Lum ");
+        if(config.LumAuto){
+          message += F("Auto");
+        }
+        else {
+          message += F("Manu");
+        }
+        message += fl;
+        message += F("luminosite = ");
+        message += String(Lum);
+        message += F("\nlumlut = ");
+        message += String(lumlut(Lum));
+        EnvoyerSms(number, sms);
+      }
+      else if(textesms.indexOf(F("LUMAUTO")) == 0){
+        if ((textesms.indexOf(char(61))) == 7) { // =
+          if(textesms.substring(8) == "1" || textesms.substring(8) == "0"){
+            config.LumAuto = textesms.substring(8).toInt();
+            sauvConfig();	// sauvegarde en EEPROM
+          }
+        }
+        message += F("Luminosite ");
+        if(config.LumAuto){
+          message += "Auto";
+        }
+        else {
+          message += "Manu";
+        }
+        message += fl;
+        EnvoyerSms(number, sms);
+      }
       else if(textesms.indexOf(F("LUMLUT")) == 0){ // Luminosité Look Up Table
         // format valeur de luminosité Feux pour chaque valeur luminosite ambiante 
         // de 100 à 0 pas de 10
@@ -1027,7 +1084,7 @@ fin_i:
         byte nv = 0; // compteur virgule
         byte p1 = 0; // position virgule
         Serial.print("pos="),Serial.println(textesms.indexOf(char(61)));
-        if ((textesms.indexOf(char(61))) == 6) {          
+        if ((textesms.indexOf(char(61))) == 6) { // =
           Sbidon = textesms.substring(7,textesms.length());
           for(int i = 0; i < Sbidon.length(); i++){
             p1 = Sbidon.indexOf(char(44),p1+1); // ,
@@ -1981,7 +2038,8 @@ void OuvrirLumLUT() {
 int lumlut(int l) {
   // retourn la valeur lut en fonction de lum actuelle
   for (int i = 0; i < 11; i++) {
-    if (l > TableLum[i][0]) {
+    if (l >= TableLum[i][0]) {
+      // Serial.printf("%s%d,%d\n","lumlut=",l,TableLum[i][1]);
       return TableLum[i][1];;
     }
   }
@@ -2059,6 +2117,7 @@ void PrintEEPROM() {
   Serial.print(F("Vitesse RepetFastBlinker = ")), Serial.println(config.FastRater);
   Serial.print(F("PWM Blanc = "))               , Serial.println(config.FBlcPWM);
   Serial.print(F("PWM Violet = "))              , Serial.println(config.FVltPWM);
+  Serial.print(F("Luminosité Auto = "))         , Serial.println(config.LumAuto);
   Serial.print(F("Liste Restreinte = "));
   for (int i = 1; i < 10; i++) {
     Serial.print(config.Pos_Pn_PB[i]);
@@ -2634,6 +2693,11 @@ void HomePage() {
   webpage += F("<tr>");
   webpage += F("<td>PWM Violet (%)</td>");
   webpage += F("<td>");	webpage += String(config.FVltPWM);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>Luminosit&eacute; Auto</td>");
+  webpage += F("<td>");	webpage += String(config.LumAuto);	webpage += F("</td>");
   webpage += F("</tr>");
 
   webpage += F("<tr>");
