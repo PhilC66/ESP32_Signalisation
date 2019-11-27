@@ -136,8 +136,8 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V0-0.7";
-int    Magique    = 10;
+String ver        = "V0-0.8";
+int    Magique    = 11;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -164,7 +164,7 @@ RTC_DATA_ATTR bool FlagAlarmeTension       = false; // Alarme tension Batterie
 RTC_DATA_ATTR bool FlagLastAlarmeTension   = false;
 RTC_DATA_ATTR bool FlagMasterOff           = false; // Coupure Allumage en cas de pb
 RTC_DATA_ATTR bool FirstWakeup             = true;  // envoie premier message vie une seule fois
-RTC_DATA_ATTR bool flagCircule             = false; // circule demandé -> inverse le calendrier, valable 1 seul jour
+RTC_DATA_ATTR bool flagCircule             = false; // circule demandé -> inverse le calendrier, valid 1 seul jour
 RTC_DATA_ATTR bool FileLogOnce             = false; // true si log > seuil alerte
 
 bool FlagAlarme24V           = false; // Alarme tension 24V Allumage
@@ -217,6 +217,8 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   int     FBlcPWM;         // Modulation Feux Blanc %
   bool    Pos_Pn_PB[10];   // numero du Phone Book (1-9) à qui envoyer 0/1 0 par defaut
   bool    LumAuto;         // luminosité Auto=true
+  bool    AutoF;           // true Retour automatique F si O/M/S apres TempoAutoF
+  int     TempoAutoF;      // temps AutoF (s)
   char    Idchar[11];      // Id
 } ;
 config_t config;
@@ -262,7 +264,7 @@ void setup() {
 
   Serial.begin(115200);
   Serial.println();
-  
+
   pinMode(PinIp1     , INPUT_PULLUP);
   pinMode(PinIp2     , INPUT_PULLUP);
   pinMode(PinFBlc    , OUTPUT);
@@ -278,10 +280,11 @@ void setup() {
   adcAttachPin(Pin24V);
   adcAttachPin(PinLum);
 
-  if(digitalRead(PinTest) == 0){ // lire strap test, si = 0 test sans carte gsm
+  if (digitalRead(PinTest) == 0) { // lire strap test, si = 0 test sans carte gsm
     gsm = false;
-    setTime(12, 00, 00, 01, 11, 2019); // il faut initialiser la date et heure
+    setTime(12, 00, 00, 15, 07, 2019); // il faut initialiser la date et heure, jour circule et midi
     Serial.println("Lancement test sans carte gsm");
+    Serial.println("mise à l'heure 14/07/2019 12:00:00");
     Serial.println("retirer lecavalier Pin27 et reset");
     Serial.println("pour redemarrer normalement");
   }
@@ -319,7 +322,7 @@ void setup() {
     Serial.println(F("Nouvelle Configuration !"));
     config.magic         = Magique;
     config.anticip       = 90;
-    config.DebutJour     = 9 * 60 * 60;
+    config.DebutJour     = 9  * 60 * 60;
     config.FinJour       = 19 * 60 * 60;
     config.RepeatWakeUp  = 60 * 60;
     config.timeoutWifi   = 10 * 60;
@@ -331,6 +334,8 @@ void setup() {
     config.FBlcPWM       = 75;
     config.FVltPWM       = 75;
     config.LumAuto       = true;
+    config.AutoF         = false;
+    config.TempoAutoF    = 3600;
     for (int i = 0; i < 10; i++) {// initialise liste PhoneBook liste restreinte
       config.Pos_Pn_PB[i] = 0;
     }
@@ -400,7 +405,7 @@ void setup() {
   OuvrirFichierCalibration(); // ouvre fichier calibration en SPIFFS
   OuvrirLumLUT();             // ouvre le fichier lumLUT
   // Serial.print(F("temps =")),Serial.println(millis());
-  if (gsm){
+  if (gsm) {
     Sim800.reset(SIMPIN);					// lancer SIM800
     MajHeure("");
   }
@@ -510,8 +515,8 @@ void Acquisition() {
 
   // en cas de feux fixe rafraichissement commande en fonction lum
   // les feux M et S sont automatiquement ajusté par blink
-  if(Feux == 1) Update_FVlt(); // Violet
-  if(Feux == 2) Update_FBlc(); // Blanc
+  if (Feux == 1) Update_FVlt(); // Violet
+  if (Feux == 2) Update_FBlc(); // Blanc
 
   // Serial.print(adc_mm[0]),Serial.print(";");
   // Serial.print(adc_mm[1]),Serial.print(";");
@@ -583,6 +588,10 @@ void Acquisition() {
       FlagReset = false;
       ResetHard();				//	reset hard
     }
+  }
+  else if (FlagReset) {
+    FlagReset = false;
+    ResetHard();				//	reset hard
   }
   envoie_alarme();
 
@@ -675,8 +684,8 @@ void blink() {
   }
 }
 //---------------------------------------------------------------------------
-void Update_FVlt(){
-  if(config.LumAuto){
+void Update_FVlt() {
+  if (config.LumAuto) {
     ledcWrite(VltPwmChanel, 255 * lumlut(Lum) / 100);
   }
   else {
@@ -684,8 +693,8 @@ void Update_FVlt(){
   }
 }
 //---------------------------------------------------------------------------
-void Update_FBlc(){
-  if(config.LumAuto){
+void Update_FBlc() {
+  if (config.LumAuto) {
     ledcWrite(BlcPwmChanel, 255 * lumlut(Lum) / 100);
   }
   else {
@@ -882,7 +891,7 @@ fin_tel:
         }
         else {
           Serial.println(Send);
-          if(gsm){
+          if (gsm) {
             Sim800.WritePhoneBook(Send);					//ecriture dans PhoneBook
             Alarm.delay(500);
             Sim800.ModeText(); //pour purger buffer fona
@@ -925,7 +934,7 @@ fin_i:
         EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("SYS")) > -1) {
-        if(gsm){
+        if (gsm) {
           Sim800.getetatSIM();// 1s
           byte n = Sim800.getNetworkStatus();// 1.1s
           String Op = Sim800.getNetworkName();// 1.05s
@@ -936,7 +945,7 @@ fin_i:
           read_RSSI();
           int Vbat = Sim800.BattVoltage();
           byte Batp = Sim800.BattPct();
-         message += F("Batt GSM : ");
+          message += F("Batt GSM : ");
           message += Vbat;
           message += F(" mV, ");
           message += Batp;
@@ -1011,7 +1020,7 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("TIME")) > -1) {
+      else if (textesms.indexOf(F("TIME")) == 0) {
         message += F("Heure Sys = ");
         message += displayTime(0);
         message += fl;
@@ -1044,9 +1053,47 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("LUMACTUELLE")) == 0){
+      else if (textesms.indexOf(F("AUTOF")) == 0) {
+        if ((textesms.indexOf(char(61))) == 5) { // =
+          if (textesms.substring(6) == "1" || textesms.substring(6) == "0") {
+            config.AutoF = textesms.substring(6).toInt();
+            sauvConfig();	// sauvegarde en EEPROM
+          }
+        }
+        message += "AutoF ";
+        if (config.AutoF == 1) {
+          message += "Auto";
+        }
+        else {
+          message += "Manu";
+        }
+        message += fl;
+        message +=  "TempoAutoF (s) = ";
+        message += config.TempoAutoF + fl;
+        EnvoyerSms(number, sms);
+      }
+      else if (textesms.indexOf(F("TEMPOAUTOF")) == 0) {
+        if ((textesms.indexOf(char(61))) == 10) { // =
+          if (textesms.substring(11).toInt() > 100 && textesms.substring(11).toInt() < 36000) {
+            config.TempoAutoF = textesms.substring(11).toInt();
+            sauvConfig();	// sauvegarde en EEPROM
+          }
+        }
+        message += "AutoF ";
+        if (config.AutoF == 1) {
+          message += F("Auto");
+        }
+        else {
+          message += F("Stop");
+        }
+        message += fl;
+        message +=  "TempoAutoF (s) = ";
+        message += config.TempoAutoF + fl;
+        EnvoyerSms(number, sms);
+      }
+      else if (textesms.indexOf(F("LUMACTUELLE")) == 0) {
         message += F("Lum ");
-        if(config.LumAuto){
+        if (config.LumAuto) {
           message += F("Auto");
         }
         else {
@@ -1059,15 +1106,15 @@ fin_i:
         message += String(lumlut(Lum));
         EnvoyerSms(number, sms);
       }
-      else if(textesms.indexOf(F("LUMAUTO")) == 0){
+      else if (textesms.indexOf(F("LUMAUTO")) == 0) {
         if ((textesms.indexOf(char(61))) == 7) { // =
-          if(textesms.substring(8) == "1" || textesms.substring(8) == "0"){
+          if (textesms.substring(8) == "1" || textesms.substring(8) == "0") {
             config.LumAuto = textesms.substring(8).toInt();
             sauvConfig();	// sauvegarde en EEPROM
           }
         }
         message += F("Luminosite ");
-        if(config.LumAuto){
+        if (config.LumAuto) {
           message += "Auto";
         }
         else {
@@ -1076,52 +1123,55 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      else if(textesms.indexOf(F("LUMLUT")) == 0){ // Luminosité Look Up Table
-        // format valeur de luminosité Feux pour chaque valeur luminosite ambiante 
+      else if (textesms.indexOf(F("LUMLUT")) == 0) { // Luminosité Look Up Table
+        // format valeur de luminosité Feux pour chaque valeur luminosite ambiante
         // de 100 à 0 pas de 10
         // LUMLUT=100,90,80,70,60,50,40,30,20,10,10
         bool flag = true; // validation du format
         byte nv = 0; // compteur virgule
         byte p1 = 0; // position virgule
-        Serial.print("pos="),Serial.println(textesms.indexOf(char(61)));
+        // Serial.print("pos="),Serial.println(textesms.indexOf(char(61)));
         if ((textesms.indexOf(char(61))) == 6) { // =
-          Sbidon = textesms.substring(7,textesms.length());
-          for(int i = 0; i < Sbidon.length(); i++){
-            p1 = Sbidon.indexOf(char(44),p1+1); // ,
-            if((p1 > 0 && p1 < 255)){
+          Sbidon = textesms.substring(7, textesms.length());
+          for (int i = 0; i < Sbidon.length(); i++) {
+            p1 = Sbidon.indexOf(char(44), p1 + 1); // ,
+            if ((p1 > 0 && p1 < 255)) {
               nv ++;
-              if(nv == 10)break;
+              if (nv == 10)break;
             }
-            else{
-              flag = false;              
+            else {
+              flag = false;
             }
             // Serial.printf("%s%d,%s%d\n","p1=",p1,"flag=",flag);
           }
           // Serial.print("flag="),Serial.println(flag);
         }
-        if(flag){ // format ok
+        else {
+          flag = false;
+        }
+        if (flag) { // format ok
           p1 = 0;
           byte p2 = 0;
-          for(int i = 0;i < 11;i++){
-            p2 = Sbidon.indexOf(char(44),p1+1); // ,
+          for (int i = 0; i < 11; i++) {
+            p2 = Sbidon.indexOf(char(44), p1 + 1); // ,
             TableLum[i][1] = Sbidon.substring(p1, p2).toInt();
             // Serial.printf("%s%d,%s%d\n","p1=",p1,"p2=",p2);
             p1 = p2 + 1;
             TableLum[i][0] = 100 - i * 10;
-            if(!(TableLum[i][1] >=0 && TableLum[i][1] < 101)) flag = false;
-            // Serial.printf("%03d,%03d\n",TableLum[i][0],TableLum[i][1]);            
+            if (!(TableLum[i][1] >= 0 && TableLum[i][1] < 101)) flag = false;
+            // Serial.printf("%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
           }
         }
-        if(flag){// données OK on enregistre
+        if (flag) { // données OK on enregistre
           EnregistreLumLUT();
         }
-        else{ // données KO on enregistre pas, et on relie les donnéesnen mémoire
+        else { // données KO on enregistre pas, et on relie les donnéesnen mémoire
           OuvrirLumLUT();
         }
         message += F("Table Luminosite (%)\n");
         char bid[9];
-        for(int i = 0; i < 11; i++){
-          sprintf(bid,"%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
+        for (int i = 0; i < 11; i++) {
+          // sprintf(bid,"%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
           message += String(bid);
         }
         EnvoyerSms(number, sms);
@@ -1322,7 +1372,7 @@ fin_i:
           }
           if (Sbidon.substring(1, 2) == "4" ) {
             Allumage(); // Allumage
-            for(int i = 0; i < 5 ; i++){
+            for (int i = 0; i < 5 ; i++) {
               read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V, PinLum); // lecture des adc
               Alarm.delay(100);
             }
@@ -1491,12 +1541,14 @@ fin_i:
         EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("E1ACTIVE")) == 0) {
+        bool valid = false;
         if (textesms.substring(7, 8) == "=") {
           if (textesms.substring(8, 9) == "1") {
             if (!config.Ip1) {
               config.Ip1 = true;
               sauvConfig();
               ActiveInterrupt();
+              valid = true;
             }
           }
           else if (textesms.substring(8, 9) == "0") {
@@ -1504,16 +1556,54 @@ fin_i:
               config.Ip1 = false;
               sauvConfig();
               DesActiveInterrupt();
+              valid = true;
             }
           }
+          if (valid) {
+            sauvConfig();															// sauvegarde en EEPROM
+          }
         }
-        message += "Entrée 1 ";
+        message += "Entree 1 ";
         if (config.Ip1) {
           message += "Active";
         }
         else {
           message += "InActive";
         }
+        message += fl;
+        EnvoyerSms(number, sms);
+      }
+      else if (textesms.indexOf(F("E2ACTIVE")) == 0) {
+        bool valid = false;
+        if (textesms.substring(7, 8) == "=") {
+          if (textesms.substring(8, 9) == "1") {
+            if (!config.Ip2) {
+              // config.Ip2 = true;
+              // sauvConfig();
+              // ActiveInterrupt();
+              // valid = true;
+            }
+          }
+          else if (textesms.substring(8, 9) == "0") {
+            if (config.Ip2) {
+              // config.Ip2 = false;
+              // sauvConfig();
+              // DesActiveInterrupt();
+              // valid = true;
+            }
+          }
+          if (valid) {
+            sauvConfig();															// sauvegarde en EEPROM
+          }
+        }
+        message += "Entree 2 ";
+        message += "Sans Action";
+        // if (config.Ip2) {
+        // message += "Active";
+        // }
+        // else {
+        // message += "InActive";
+        // }
         message += fl;
         EnvoyerSms(number, sms);
       }
@@ -1668,7 +1758,7 @@ void EnvoyerSms(char *num, bool sms) {
 }
 //---------------------------------------------------------------------------
 void read_RSSI() {	// lire valeur RSSI et remplir message
-  if(gsm){
+  if (gsm) {
     int r;
     byte n = Sim800.getRSSI();
     // Serial.print(F("RSSI = ")); Serial.print(n); Serial.print(F(": "));
@@ -1688,7 +1778,7 @@ void read_RSSI() {	// lire valeur RSSI et remplir message
 }
 //---------------------------------------------------------------------------
 void MajHeure(String smsdate) {
-  if(gsm){
+  if (gsm) {
     /*parametrage du SIM800 a faire une fois
       AT+CLTS? si retourne 0
       AT+CLTS=1
@@ -1941,7 +2031,7 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
     message += F("Fichier log presque plein\n");
     message += String(f.size());
     message += F("\nFichier sera efface a 300000");
-    if(gsm){
+    if (gsm) {
       String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
       char num[13];
       number.toCharArray(num, 13);
@@ -1953,7 +2043,7 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
     message += F("Fichier log plein\n");
     message += String(f.size());
     message += F("\nFichier efface");
-    if(gsm){
+    if (gsm) {
       String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
       char num[13];
       number.toCharArray(num, 13);
@@ -1992,7 +2082,7 @@ void EnregistreCalendrier() { // remplace le calendrier
   }
 }
 //---------------------------------------------------------------------------
-void EnregistreLumLUT(){
+void EnregistreLumLUT() {
   SPIFFS.remove(filelumlut);
   char bid[9];
   for (int i = 0; i < 11; i++) {
@@ -2026,8 +2116,8 @@ void OuvrirLumLUT() {
       }
       sprintf(bid, "%d,%d\n", v1, v2);
       appendFile(SPIFFS, filelumlut, bid);
-      TableLum[i][0]=v1;
-      TableLum[i][1]=v2;
+      TableLum[i][0] = v1;
+      TableLum[i][1] = v2;
     }
   }
   for (int i = 0; i < 11 ; i++) {
@@ -2118,6 +2208,8 @@ void PrintEEPROM() {
   Serial.print(F("PWM Blanc = "))               , Serial.println(config.FBlcPWM);
   Serial.print(F("PWM Violet = "))              , Serial.println(config.FVltPWM);
   Serial.print(F("Luminosité Auto = "))         , Serial.println(config.LumAuto);
+  Serial.print("Auto F si O/M/S = ")         , Serial.println(config.AutoF);
+  Serial.print("Tempo Auto (s) = ")          , Serial.println(config.TempoAutoF);
   Serial.print(F("Liste Restreinte = "));
   for (int i = 1; i < 10; i++) {
     Serial.print(config.Pos_Pn_PB[i]);
@@ -2317,10 +2409,10 @@ String Hdectohhmm(long Hdec) {
 //---------------------------------------------------------------------------
 void DesActiveInterrupt() {
   if (config.Ip1) {
-  detachInterrupt(digitalPinToInterrupt(PinIp1));
+    detachInterrupt(digitalPinToInterrupt(PinIp1));
   }
   if (config.Ip2) {
-  detachInterrupt(digitalPinToInterrupt(PinIp2));
+    detachInterrupt(digitalPinToInterrupt(PinIp2));
   }
 }
 //---------------------------------------------------------------------------
@@ -2402,7 +2494,7 @@ void DebutSleep() {
   Serial.println(F("Going to sleep now"));
 
   byte i = 0;
-  if(gsm){
+  if (gsm) {
     while (!Sim800.sleep()) {
       Alarm.delay(100);
       if (i++ > 10) break;
@@ -2706,6 +2798,16 @@ void HomePage() {
   webpage += F("</tr>");
 
   webpage += F("<tr>");
+  webpage += F("<td>Auto F si O/M/S</td>");
+  webpage += F("<td>");	webpage += String(config.AutoF);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>Tempo AutoF(s)</td>");
+  webpage += F("<td>");	webpage += String(config.TempoAutoF);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
   webpage += F("<td>TimeOut Wifi (s)</td>");
   webpage += F("<td>");	webpage += String(config.timeoutWifi);	webpage += F("</td>");
   webpage += F("</tr>");
@@ -2759,7 +2861,7 @@ void HomePage() {
   SendHTML_Stop(); // Stop is needed because no content length was sent
 }
 //---------------------------------------------------------------------------
-void LumLUTPage(){
+void LumLUTPage() {
   SendHTML_Header();
   webpage += F("<h3 class='rcorners_m'>Table Luminosit&eacute;</h3><br>");
   webpage += F("<table align='center'>");
@@ -2767,7 +2869,7 @@ void LumLUTPage(){
   webpage += F("<th> Lum Ambiante % </th>");
   webpage += F("<th> Lum Feux %</th>");
   webpage += F("</tr>");
-  for(int i = 0; i < 11; i++){
+  for (int i = 0; i < 11; i++) {
     webpage += F("<tr>");
     webpage += F("<td>"); webpage += TableLum[i][0] ; webpage += F("</td>");
     webpage += F("<td>"); webpage += TableLum[i][1] ; webpage += F("</td>");
@@ -2788,7 +2890,7 @@ void Tel_listPage() {
   webpage += F("<th> Num&eacute;ro </th>");
   webpage += F("<th> Liste restreinte </th>");
   webpage += F("</tr>");
-  if(gsm){
+  if (gsm) {
     byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
     for (byte i = 1; i < n + 1; i++) {
       String num = Sim800.getPhoneBookNumber(i);
