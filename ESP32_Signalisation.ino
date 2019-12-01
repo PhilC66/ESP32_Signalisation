@@ -52,8 +52,7 @@
 				0			|			0				|			0
 				1			|			1				|			0
 
-	Librairie TimeAlarms.h modifiée
-	#define dtNBR_ALARMS 10 (ne fonctionne pas avec 9)   6 à l'origine nombre d'alarmes RAM*11 max is 255
+	Librairie TimeAlarms.h modifiée a priori pas necessaire nonAVR = 12
 
   --- ATTENTION ---
 	l'utilisation de l'adc sur GPIO26 pour la mesure du 24V
@@ -74,7 +73,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 985050 75%, 47680 14% sur PC
+  Arduino IDE 1.8.10 : 987810 75%, 47680 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -136,7 +135,7 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V0-0.8";
+String ver        = "V0-0.9";
 int    Magique    = 11;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
@@ -228,8 +227,9 @@ Ticker FastBlink; // Clignotant rapide
 Ticker FastRate;  // Repetition Clignotant rapide
 Ticker ADC;       // Lecture des Adc
 
-AlarmId loopPrincipale;	// boucle principale
-AlarmId FinJour;				// Fin de journée retour deep sleep
+AlarmId loopPrincipale; // boucle principale
+AlarmId FinJour;        // Fin de journée retour deep sleep
+AlarmId Auto_F;         // Tempo AutoF
 
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -415,6 +415,9 @@ void setup() {
 
   FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee); // Fin de journée retour deep sleep
   Alarm.enable(FinJour);
+
+  Auto_F = Alarm.timerRepeat(config.TempoAutoF, AutoFermeture);
+  Alarm.disable(Auto_F);
 
   ActiveInterrupt();
 
@@ -716,7 +719,19 @@ void Extinction() {
   Allume = false;
   digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
   MajLog(F("Auto"), "Feux = " + String(Feux));
-  envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
+  envoieGroupeSMS(3, 0); // envoie serveur
+}
+//---------------------------------------------------------------------------
+void AutoFermeture() {
+  // fin de TempoAutoF
+  // Feux à F si Feux = O/M/S
+  if (Feux > 1) {
+    Feux = 1;
+    Allumage(); // Violet 1, Blanc 0
+    envoieGroupeSMS(3, 0); // envoie serveur
+    MajLog("AutoF", "FCV");
+  }
+  Alarm.disable(Auto_F);
 }
 //---------------------------------------------------------------------------
 void SelftestFeux() {
@@ -930,6 +945,7 @@ fin_i:
         if (message.length() > Id.length() + 20) EnvoyerSms(number, sms);; // SMS final
       }
       else if (textesms.indexOf(F("ETAT")) == 0 || textesms.indexOf(F("ST")) == 0) {// "ETAT? de l'installation"
+        if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         generationMessage(0);
         EnvoyerSms(number, sms);
       }
@@ -1439,25 +1455,38 @@ fin_i:
           Feux = 2;
           Allumage(); // Violet 0, Blanc 1
           MajLog(nom, "OCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         }
         else if (textesms.indexOf("M") == 0) {
           Feux = 3;
           Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
           MajLog(nom, "MCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         }
         else if (textesms.indexOf("S") == 0) {
           Feux = 4;
           Allumage(); // Violet 0, Blanc Secteur Cli rapide
           MajLog(nom, "SCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         }
         else {
           // message += "non reconnu" + fl;
         }
         generationMessage(0);
-        if (Feux != 0) { // seulement si different de DCV, doublon DCV envoie automatiquement une reponse
-          envoieGroupeSMS(0, 0);			// envoie groupé obligatoire pour serveur
+        if (Feux != 0) { // seulement si different de DCV, doublon DCV envoie automatiquement une reponse dans Extiction()
+          envoieGroupeSMS(3, 0); // envoie serveur
         }
-        // EnvoyerSms(number, sms);
+        // avant de répondre, verifier si demande ne vient pas du serveur
+        // evite de repondre 2 fois au serveur
+        byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
+        for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
+          String num = Sim800.getPhoneBookNumber(Index);
+          // Serial.print("num demandeur"),Serial.print(number),Serial.print(", num liste"),Serial.print(num);
+          // Serial.print("different "),Serial.println(num != number);
+          if(num != number){            
+            EnvoyerSms(number, sms); // reponse
+          }
+        }
       }
       else if (textesms.indexOf(F("FBLCPWM")) == 0) {
         if (textesms.substring(7, 8) == "=") {
@@ -1651,12 +1680,15 @@ void envoieGroupeSMS(byte grp, bool m) {
     	SAUF ceux de la liste restreinte
       si grp = 1,
       envoie un SMS à tous les numero existant (9 max) du Phone Book
-      de la liste restreinte config.Pos_Pn_PB[x]=1			*/
+      de la liste restreinte config.Pos_Pn_PB[x]=1
+      si grp = 3,
+      Message au Serveur seulement N°1 de la liste			*/
 
     byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
     // Serial.print(F("Nombre de ligne PB=")),Serial.println(n);
+    if (grp == 3) n = 1; // limite la liste à ligne 1
     for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
-      if ((grp == 0 && config.Pos_Pn_PB[Index] == 0) || (grp == 1 && config.Pos_Pn_PB[Index] == 1)) {
+      if ((grp == 3) || (grp == 0 && config.Pos_Pn_PB[Index] == 0) || (grp == 1 && config.Pos_Pn_PB[Index] == 1)) {
         String number = Sim800.getPhoneBookNumber(Index);
         generationMessage(m);
         char num[13];
@@ -1838,11 +1870,13 @@ void MajHeure(String smsdate) {
         // ArretSonnerie();	// Arret Sonnerie propre
         Alarm.disable(loopPrincipale);
         Alarm.disable(FinJour);
+        Alarm.disable(Auto_F);
 
         setTime(Nhour, Nminute, Nsecond, Nday, Nmonth, Nyear);
 
         Alarm.enable(loopPrincipale);
         Alarm.enable(FinJour);
+        if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
       }
     }
   }
