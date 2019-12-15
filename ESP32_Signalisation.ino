@@ -767,6 +767,7 @@ void traite_sms(byte slot) {
   textesms.reserve(140);
   String numero;
   String nom;
+  bool smsserveur = false; // true si le sms provient du serveur index=1
 
   byte i;
   byte j;
@@ -796,6 +797,9 @@ void traite_sms(byte slot) {
       nom = Sim800.getNameSms(slot);      // recupere le nom appelant
       textesms = Sim800.readSms(slot);    // recupere le contenu
       textesms = ExtraireSms(textesms);
+      if(Sim800.getNumberSms(slot) = Sim800.getPhoneBookNumber(1)){
+        smsserveur = true; // si sms provient du serveur index=1
+      }
       if (nom.length() < 1) { // si nom vide, cherche si numero est num de la SIM
         if (numero == Sim800.getNumTel()) {
           nom = F("Moi meme");
@@ -1473,20 +1477,20 @@ fin_i:
           // message += "non reconnu" + fl;
         }
         generationMessage(0);
-        if (Feux != 0) { // seulement si different de DCV, doublon DCV envoie automatiquement une reponse dans Extiction()
+        if (Feux != 0) { // seulement si different de DCV, doublon DCV envoie automatiquement une reponse dans Extinction()
           envoieGroupeSMS(3, 0); // envoie serveur
         }
-        // avant de répondre, verifier si demande ne vient pas du serveur
         // evite de repondre 2 fois au serveur
-        byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
-        for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
-          String num = Sim800.getPhoneBookNumber(Index);
+        if(!smsserveur)EnvoyerSms(number, sms); // reponse si pas serveur
+        // byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
+        // for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
+          // String num = Sim800.getPhoneBookNumber(Index);
           // Serial.print("num demandeur"),Serial.print(number),Serial.print(", num liste"),Serial.print(num);
           // Serial.print("different "),Serial.println(num != number);
-          if(num != number){            
-            EnvoyerSms(number, sms); // reponse
-          }
-        }
+          // if(num != number){
+            // EnvoyerSms(number, sms); // reponse
+          // }
+        // }
       }
       else if (textesms.indexOf(F("FBLCPWM")) == 0) {
         if (textesms.substring(7, 8) == "=") {
