@@ -1569,6 +1569,30 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
+      else if (textesms.indexOf(F("PARAM")) == 0) {
+        if (textesms.substring(5, 6) == "=") {
+          
+        }
+        message += "<param>"; // identifiant pour serveur, ne fait pas partie du json
+        message += "{\"slowblinker\":" + String(config.SlowBlinker) +","+fl;
+        message += "\"fastblinker\":" + String(config.FastBlinker) +","+fl;
+        message += "\"fastrater\":" + String(config.FastRater) +","+fl;
+        message += "\"debut\":\"" + Hdectohhmm(config.DebutJour) +"\","+fl;
+        message += "\"fin\":\"" + Hdectohhmm(config.FinJour) +"\","+fl;
+        message += "\"autof\":" + String(config.AutoF) +","+fl;
+        message += "\"tempoautof\":" + String(config.TempoAutoF) +","+fl;
+        message += "\"fblcpwm\":" + String(config.FBlcPWM) +","+fl;
+        message += "\"fvltpwm\":" + String(config.FVltPWM) +","+fl;
+        message += "\"lumauto\":" + String(config.LumAuto) +","+fl;
+        message += "\"lumlut\":[";
+        for (int i = 0; i <11;i++){
+          message += String(TableLum[i][1] );
+          if (i < 10) message += ",";
+        }
+        message += "]}" + fl;
+        // Serial.print (message);
+        EnvoyerSms(number, sms);        
+      }
       else if (textesms.indexOf(F("E1ACTIVE")) == 0) {
         bool valid = false;
         if (textesms.substring(7, 8) == "=") {
