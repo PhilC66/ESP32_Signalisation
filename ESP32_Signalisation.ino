@@ -73,7 +73,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 987810 75%, 47680 14% sur PC
+  Arduino IDE 1.8.10 : 990990 75%, 47680 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -135,7 +135,7 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V0-0.9";
+String ver        = "V1-1";
 int    Magique    = 11;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
@@ -1234,13 +1234,26 @@ fin_i:
           }
         }
         else if (flag) { // ? demande calendrier pour un mois donné
-          message += F("mois = ");
-          message += m;
-          message += fl;
-          for (int i = 1; i < 32 ; i++) {
-            message += calendrier[m][i];
-            if ((i % 5)  == 0) message += " ";
-            if ((i % 10) == 0) message += fl;
+          if(smsserveur){
+            // si serveur reponse json
+            // {"mois":12,"jour":[1,2,4,5,6 .. 31]}
+            message +="{\"mois\":" + String(m) + "," +fl;
+            message += "\"jour\":[";
+            for (int i = 1; i < 32 ; i++){
+              message += String(calendrier[m][i]);
+              if (i < 31) message += ",";
+            }
+            message += "]}";
+          }
+          else{
+            message += F("mois = ");
+            message += m;
+            message += fl;
+            for (int i = 1; i < 32 ; i++) {
+              message += calendrier[m][i];
+              if ((i % 5)  == 0) message += " ";
+              if ((i % 10) == 0) message += fl;
+            }
           }
         }
         if (!flag) {
@@ -1575,9 +1588,9 @@ fin_i:
       }
       else if (textesms.indexOf(F("PARAM")) == 0) {
         if (textesms.substring(5, 6) == "=") {
-          
+          // a faire traitement json en reception
         }
-        message += "<param>"; // identifiant pour serveur, ne fait pas partie du json
+        message += "{\"param\":"; // json param
         message += "{\"slowblinker\":" + String(config.SlowBlinker) +","+fl;
         message += "\"fastblinker\":" + String(config.FastBlinker) +","+fl;
         message += "\"fastrater\":" + String(config.FastRater) +","+fl;
@@ -1593,7 +1606,7 @@ fin_i:
           message += String(TableLum[i][1] );
           if (i < 10) message += ",";
         }
-        message += "]}" + fl;
+        message += "]}}" + fl;
         // Serial.print (message);
         EnvoyerSms(number, sms);        
       }
