@@ -797,7 +797,7 @@ void traite_sms(byte slot) {
       nom = Sim800.getNameSms(slot);      // recupere le nom appelant
       textesms = Sim800.readSms(slot);    // recupere le contenu
       textesms = ExtraireSms(textesms);
-      if(Sim800.getNumberSms(slot) = Sim800.getPhoneBookNumber(1)){
+      if(Sim800.getNumberSms(slot) == Sim800.getPhoneBookNumber(1)){
         smsserveur = true; // si sms provient du serveur index=1
       }
       if (nom.length() < 1) { // si nom vide, cherche si numero est num de la SIM
@@ -2838,17 +2838,17 @@ void HomePage() {
   webpage += F("</tr>");
 
   webpage += F("<tr>");
-  webpage += F("<td>Vitesse SlowBlinker (ms)</td>");
+  webpage += F("<td>Vitesse SlowBlinker (5-2000ms)</td>");
   webpage += F("<td>");	webpage += String(config.SlowBlinker);	webpage += F("</td>");
   webpage += F("</tr>");
 
   webpage += F("<tr>");
-  webpage += F("<td>Vitesse FastBlinker (ms)</td>");
+  webpage += F("<td>Vitesse FastBlinker (5-2000ms)</td>");
   webpage += F("<td>");	webpage += String(config.FastBlinker);	webpage += F("</td>");
   webpage += F("</tr>");
 
   webpage += F("<tr>");
-  webpage += F("<td>R&eacute;p&eacute;tition FastBlink (ms)</td>");
+  webpage += F("<td>R&eacute;p&eacute;tition FastBlink (5-3000ms)</td>");
   webpage += F("<td>");	webpage += String(config.FastRater);	webpage += F("</td>");
   webpage += F("</tr>");
 
@@ -2878,7 +2878,7 @@ void HomePage() {
   webpage += F("</tr>");
 
   webpage += F("<tr>");
-  webpage += F("<td>Tempo AutoF(s)</td>");
+  webpage += F("<td>Tempo AutoF(100-36 000 s)</td>");
   webpage += F("<td>");	webpage += String(config.TempoAutoF);	webpage += F("</td>");
   webpage += F("</tr>");
 
