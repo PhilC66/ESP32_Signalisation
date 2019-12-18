@@ -1189,9 +1189,9 @@ fin_i:
           OuvrirLumLUT();
         }
         message += F("Table Luminosite (%)\n");
-        char bid[9];
+        char bid[100];
         for (int i = 0; i < 11; i++) {
-          // sprintf(bid,"%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
+          sprintf(bid,"%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
           message += String(bid);
         }
         EnvoyerSms(number, sms);
@@ -2627,6 +2627,7 @@ void action_wakeup_reason(byte wr) { // action en fonction du wake up
         Sbidon = F("Jour circule ou demande circulation");
         Serial.println(Sbidon);
         MajLog(F("Auto"), Sbidon);
+        
       }
       else { // non circulé
         Sbidon = F("Jour noncircule ou nuit");
