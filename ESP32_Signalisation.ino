@@ -1189,7 +1189,7 @@ fin_i:
           OuvrirLumLUT();
         }
         message += F("Table Luminosite (%)\n");
-        char bid[100];
+        char bid[10];// 1 ligne
         for (int i = 0; i < 11; i++) {
           sprintf(bid,"%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
           message += String(bid);
