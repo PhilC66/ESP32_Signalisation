@@ -73,7 +73,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 991038 75%, 47680 14% sur PC
+  Arduino IDE 1.8.10 : 996066 75%, 47752 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -93,6 +93,7 @@
 #include <SPI.h>
 #include <Ticker.h>
 #include "passdata.h"
+#include <ArduinoJson.h>
 
 String  webpage = "";
 #define ServerVersion "1.0"
@@ -797,7 +798,7 @@ void traite_sms(byte slot) {
       nom = Sim800.getNameSms(slot);      // recupere le nom appelant
       textesms = Sim800.readSms(slot);    // recupere le contenu
       textesms = ExtraireSms(textesms);
-      if(Sim800.getNumberSms(slot) == Sim800.getPhoneBookNumber(1)){
+      if (Sim800.getNumberSms(slot) == Sim800.getPhoneBookNumber(1)) {
         smsserveur = true; // si sms provient du serveur index=1
       }
       if (nom.length() < 1) { // si nom vide, cherche si numero est num de la SIM
@@ -1143,15 +1144,25 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("LUMLUT")) == 0) { // Luminosité Look Up Table
+      else if (textesms.indexOf(F("LUMLUT")) > -1) { // Luminosité Look Up Table
         // format valeur de luminosité Feux pour chaque valeur luminosite ambiante
         // de 100 à 0 pas de 10
         // LUMLUT=100,90,80,70,60,50,40,30,20,10,10
         bool flag = true; // validation du format
         byte nv = 0; // compteur virgule
         byte p1 = 0; // position virgule
-        // Serial.print("pos="),Serial.println(textesms.indexOf(char(61)));
-        if ((textesms.indexOf(char(61))) == 6) { // =
+        if (textesms.indexOf("{") == 0) { // json
+          DynamicJsonDocument doc(200);
+          int f = textesms.lastIndexOf("}");
+          // Serial.print("pos }:"),Serial.println(f);
+          // Serial.print("json:"),Serial.print(textesms.substring(0,f+1)),Serial.println(".");
+          deserializeJson(doc, textesms.substring(0, f + 1));
+          JsonArray LUMLUT = doc["LUMLUT"];
+          for (int i = 0; i < 11; i++) {
+            TableLum[i][1] = LUMLUT[i];
+          }
+        }
+        else if ((textesms.indexOf(char(61))) == 6) { // =
           Sbidon = textesms.substring(7, textesms.length());
           for (int i = 0; i < Sbidon.length(); i++) {
             p1 = Sbidon.indexOf(char(44), p1 + 1); // ,
@@ -1165,21 +1176,22 @@ fin_i:
             // Serial.printf("%s%d,%s%d\n","p1=",p1,"flag=",flag);
           }
           // Serial.print("flag="),Serial.println(flag);
-        }
-        else {
-          flag = false;
-        }
-        if (flag) { // format ok
-          p1 = 0;
-          byte p2 = 0;
-          for (int i = 0; i < 11; i++) {
-            p2 = Sbidon.indexOf(char(44), p1 + 1); // ,
-            TableLum[i][1] = Sbidon.substring(p1, p2).toInt();
-            // Serial.printf("%s%d,%s%d\n","p1=",p1,"p2=",p2);
-            p1 = p2 + 1;
-            TableLum[i][0] = 100 - i * 10;
-            if (!(TableLum[i][1] >= 0 && TableLum[i][1] < 101)) flag = false;
-            // Serial.printf("%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
+          // }
+          // else {
+          // flag = false;
+          // }
+          if (flag) { // format ok
+            p1 = 0;
+            byte p2 = 0;
+            for (int i = 0; i < 11; i++) {
+              p2 = Sbidon.indexOf(char(44), p1 + 1); // ,
+              TableLum[i][1] = Sbidon.substring(p1, p2).toInt();
+              // Serial.printf("%s%d,%s%d\n","p1=",p1,"p2=",p2);
+              p1 = p2 + 1;
+              TableLum[i][0] = 100 - i * 10;
+              if (!(TableLum[i][1] >= 0 && TableLum[i][1] < 101)) flag = false;
+              // Serial.printf("%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
+            }
           }
         }
         if (flag) { // données OK on enregistre
@@ -1188,71 +1200,112 @@ fin_i:
         else { // données KO on enregistre pas, et on relie les donnéesnen mémoire
           OuvrirLumLUT();
         }
-        message += F("Table Luminosite (%)\n");
-        char bid[10];// 1 ligne
-        for (int i = 0; i < 11; i++) {
-          sprintf(bid,"%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
-          message += String(bid);
+        if (smsserveur || !sms) {
+          // si serveur reponse json
+          DynamicJsonDocument doc(200);
+          JsonArray lumlut = doc.createNestedArray("lumlut");
+          for (int i = 0; i < 11; i++) {
+            lumlut.add(TableLum[i][1]);
+          }
+          String jsonbidon;
+          serializeJson(doc, jsonbidon);
+          message += jsonbidon;
+        } else {
+          message += F("Table Luminosite (%)\n");
+          char bid[10];// 1 ligne
+          for (int i = 0; i < 11; i++) {
+            sprintf(bid, "%03d,%03d\n", TableLum[i][0], TableLum[i][1]);
+            message += String(bid);
+          }
         }
+        message += fl;
         EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("MOIS")) == 0) { // Calendrier pour un mois
+      else if (textesms.indexOf(F("MOIS")) > -1) { // Calendrier pour un mois
         /* mise a jour calendrier ;format : MOIS=mm,31 fois 0/1
           demande calendrier pour un mois donné ; format : MOIS=mm? */
         bool flag = true; // validation du format
         bool W = true; // true Write, false Read
-
-        byte p1 = textesms.indexOf(char(61)); // =
-        byte p2 = textesms.indexOf(char(44)); // ,
-        if (p2 == 255) {                      // pas de ,
-          p2 = textesms.indexOf(char(63));    // ?
-          W = false;
+        if (textesms.indexOf("{") == 0) { // json
+          DynamicJsonDocument doc(540);
+          int f = textesms.lastIndexOf("}");
+          // Serial.print("pos }:"),Serial.println(f);
+          // Serial.print("json:"),Serial.print(textesms.substring(0,f+1)),Serial.println(".");,1,1,1,1,1,0,0,0,0,0,0]}";
+          deserializeJson(doc, textesms.substring(0, f + 1));
+          int m = doc["MOIS"]; // 12
+          JsonArray jour = doc["JOUR"];
+          for (int j = 1; j < 32; j++) {
+            calendrier[m][j] = jour[j - 1];
+          }
+          // Serial.print("mois:"),Serial.println(m);
+          EnregistreCalendrier(); // Sauvegarde en SPIFFS
+          message += F("Mise a jour calendrier mois:");
+          message += m;
+          message += " OK (json)";
         }
+        else { // message normal mois=12,31*0/1
+          byte p1 = textesms.indexOf(char(61)); // =
+          byte p2 = textesms.indexOf(char(44)); // ,
+          if (p2 == 255) {                      // pas de ,
+            p2 = textesms.indexOf(char(63));    // ?
+            W = false;
+          }
 
-        byte m = textesms.substring(p1 + 1, p2).toInt(); // mois
+          byte m = textesms.substring(p1 + 1, p2).toInt(); // mois
 
-        // printf("p1=%d,p2=%d\n",p1,p2);
-        // Serial.println(textesms.substring(p1+1,p2).toInt());
-        // Serial.println(textesms.substring(p2+1,textesms.length()).length());
-        if (!(m > 0 && m < 13)) flag = false;
-        if (W && flag) { // Write
-          if (!(textesms.substring(p2 + 1, textesms.length()).length() == 31)) flag = false; // si longueur = 31(jours)
+          // printf("p1=%d,p2=%d\n",p1,p2);
+          // Serial.println(textesms.substring(p1+1,p2).toInt());
+          // Serial.println(textesms.substring(p2+1,textesms.length()).length());
+          if (!(m > 0 && m < 13)) flag = false;
+          if (W && flag) { // Write
+            if (!(textesms.substring(p2 + 1, textesms.length()).length() == 31)) flag = false; // si longueur = 31(jours)
 
-          for (int i = 1; i < 32; i++) { // verification 0/1
-            if (!(textesms.substring(p2 + i, p2 + i + 1) == "0" || textesms.substring(p2 + i, p2 + i + 1) == "1")) {
-              flag = false;
+            for (int i = 1; i < 32; i++) { // verification 0/1
+              if (!(textesms.substring(p2 + i, p2 + i + 1) == "0" || textesms.substring(p2 + i, p2 + i + 1) == "1")) {
+                flag = false;
+              }
+            }
+            if (flag) {
+              // Serial.println(F("mise a jour calendrier"));
+              for (int i = 1; i < 32; i++) {
+                calendrier[m][i] = textesms.substring(p2 + i, p2 + i + 1).toInt();
+                // Serial.print(textesms.substring(p2+i,p2+i+1));
+              }
+              EnregistreCalendrier(); // Sauvegarde en SPIFFS
+              message += F("Mise a jour calendrier mois:");
+              message += m;
+              message += " OK";
             }
           }
-          if (flag) {
-            // Serial.println(F("mise a jour calendrier"));
-            for (int i = 1; i < 32; i++) {
-              calendrier[m][i] = textesms.substring(p2 + i, p2 + i + 1).toInt();
-              // Serial.print(textesms.substring(p2+i,p2+i+1));
+          else if (flag) { // ? demande calendrier pour un mois donné
+            if (smsserveur || !sms) {
+              // si serveur reponse json  {"mois":12,"jour":[1,2,4,5,6 .. 31]}
+              DynamicJsonDocument doc(540);
+              doc["mois"] = m;
+              JsonArray jour = doc.createNestedArray("jour");
+              for (int i = 1; i < 32; i++) {
+                jour.add(calendrier[m][i]);
+              }
+              String jsonbidon;
+              serializeJson(doc, jsonbidon);
+              message += jsonbidon;
+              // message +="{\"mois\":" + String(m) + "," +fl;
+              // message += "\"jour\":[";
+              // for (int i = 1; i < 32 ; i++){
+              // message += String(calendrier[m][i]);
+              // if (i < 31) message += ",";
+              // }
+              // message += "]}";
             }
-            EnregistreCalendrier(); // Sauvegarde en SPIFFS
-            message += F("Mise a jour calendrier OK");
-          }
-        }
-        else if (flag) { // ? demande calendrier pour un mois donné
-          if(smsserveur){
-            // si serveur reponse json
-            // {"mois":12,"jour":[1,2,4,5,6 .. 31]}
-            message +="{\"mois\":" + String(m) + "," +fl;
-            message += "\"jour\":[";
-            for (int i = 1; i < 32 ; i++){
-              message += String(calendrier[m][i]);
-              if (i < 31) message += ",";
-            }
-            message += "]}";
-          }
-          else{
-            message += F("mois = ");
-            message += m;
-            message += fl;
-            for (int i = 1; i < 32 ; i++) {
-              message += calendrier[m][i];
-              if ((i % 5)  == 0) message += " ";
-              if ((i % 10) == 0) message += fl;
+            else {
+              message += F("mois = ");
+              message += m;
+              message += fl;
+              for (int i = 1; i < 32 ; i++) {
+                message += calendrier[m][i];
+                if ((i % 5)  == 0) message += " ";
+                if ((i % 10) == 0) message += fl;
+              }
             }
           }
         }
@@ -1494,15 +1547,15 @@ fin_i:
           envoieGroupeSMS(3, 0); // envoie serveur
         }
         // evite de repondre 2 fois au serveur
-        if(!smsserveur)EnvoyerSms(number, sms); // reponse si pas serveur
+        if (!smsserveur)EnvoyerSms(number, sms); // reponse si pas serveur
         // byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
         // for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
-          // String num = Sim800.getPhoneBookNumber(Index);
-          // Serial.print("num demandeur"),Serial.print(number),Serial.print(", num liste"),Serial.print(num);
-          // Serial.print("different "),Serial.println(num != number);
-          // if(num != number){
-            // EnvoyerSms(number, sms); // reponse
-          // }
+        // String num = Sim800.getPhoneBookNumber(Index);
+        // Serial.print("num demandeur"),Serial.print(number),Serial.print(", num liste"),Serial.print(num);
+        // Serial.print("different "),Serial.println(num != number);
+        // if(num != number){
+        // EnvoyerSms(number, sms); // reponse
+        // }
         // }
       }
       else if (textesms.indexOf(F("FBLCPWM")) == 0) {
@@ -1590,25 +1643,33 @@ fin_i:
         if (textesms.substring(5, 6) == "=") {
           // a faire traitement json en reception
         }
-        message += "{\"param\":"; // json param
-        message += "{\"slowblinker\":" + String(config.SlowBlinker) +","+fl;
-        message += "\"fastblinker\":" + String(config.FastBlinker) +","+fl;
-        message += "\"fastrater\":" + String(config.FastRater) +","+fl;
-        message += "\"debut\":\"" + Hdectohhmm(config.DebutJour) +"\","+fl;
-        message += "\"fin\":\"" + Hdectohhmm(config.FinJour) +"\","+fl;
-        message += "\"autof\":" + String(config.AutoF) +","+fl;
-        message += "\"tempoautof\":" + String(config.TempoAutoF) +","+fl;
-        message += "\"fblcpwm\":" + String(config.FBlcPWM) +","+fl;
-        message += "\"fvltpwm\":" + String(config.FVltPWM) +","+fl;
-        message += "\"lumauto\":" + String(config.LumAuto) +","+fl;
-        message += "\"lumlut\":[";
-        for (int i = 0; i <11;i++){
-          message += String(TableLum[i][1] );
-          if (i < 10) message += ",";
+        // ne fonctionne pas
+        // const size_t capacity = JSON_ARRAY_SIZE(11) + JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(11);
+        // calculer taille https://arduinojson.org/v6/assistant/
+        DynamicJsonDocument doc(500);
+        JsonObject param = doc.createNestedObject("param");
+
+        param["slowblinker"] = config.SlowBlinker;//500;
+        param["fastblinker"] = config.FastBlinker;//150;
+        param["fastrater"] = config.FastRater;//1000;
+        param["debut"] = Hdectohhmm(config.DebutJour);//"09:00:00";
+        param["fin"] = Hdectohhmm(config.FinJour);
+        param["autof"] = config.AutoF;//0;
+        param["tempoautof"] = config.TempoAutoF;//3600;
+        param["fblcpwm"] = config.FBlcPWM;//75;
+        param["fvltpwm"] = config.FVltPWM;//100;
+        param["lumauto"] = config.LumAuto;//0;
+
+        JsonArray param_lumlut = param.createNestedArray("lumlut");
+        for (int i = 0; i < 11; i++) {
+          param_lumlut.add(TableLum[i][1]);
         }
-        message += "]}}" + fl;
-        // Serial.print (message);
-        EnvoyerSms(number, sms);        
+        String jsonbidon;
+        serializeJson(doc, jsonbidon);
+        // serializeJson(doc, Serial);
+        message += jsonbidon;
+        message += fl;
+        EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("E1ACTIVE")) == 0) {
         bool valid = false;
@@ -2627,7 +2688,7 @@ void action_wakeup_reason(byte wr) { // action en fonction du wake up
         Sbidon = F("Jour circule ou demande circulation");
         Serial.println(Sbidon);
         MajLog(F("Auto"), Sbidon);
-        
+
       }
       else { // non circulé
         Sbidon = F("Jour noncircule ou nuit");
