@@ -229,6 +229,7 @@ Ticker FastRate;  // Repetition Clignotant rapide
 Ticker ADC;       // Lecture des Adc
 
 AlarmId loopPrincipale; // boucle principale
+AlarmId DebutJour;      // Debut journée
 AlarmId FinJour;        // Fin de journée retour deep sleep
 AlarmId Auto_F;         // Tempo AutoF
 
@@ -413,6 +414,9 @@ void setup() {
 
   loopPrincipale = Alarm.timerRepeat(10, Acquisition); // boucle principale 10s
   Alarm.enable(loopPrincipale);
+
+  DebutJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);
+  Alarm.enable(DebutJour);
 
   FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee); // Fin de journée retour deep sleep
   Alarm.enable(FinJour);
@@ -1016,7 +1020,7 @@ fin_i:
       else if (textesms.indexOf(F("ANTICIP")) > -1) { // Anticipation du wakeup
         if (textesms.indexOf(char(61)) == 7) {
           int n = textesms.substring(8, textesms.length()).toInt();
-          if (n > 9 && n < 601) {
+          if (n > 9 && n < 3601) {
             config.anticip = n;
             sauvConfig();														// sauvegarde en EEPROM
           }
@@ -1032,6 +1036,9 @@ fin_i:
           if (i > 0 && i <= 86340) {                    //	ok si entre 0 et 86340(23h59)
             config.DebutJour = i;
             sauvConfig();                               // sauvegarde en EEPROM
+            Alarm.disable(DebutJour);
+            FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
+            Alarm.enable(DebutJour);
             AIntru_HeureActuelle();
           }
         }
@@ -1065,7 +1072,9 @@ fin_i:
           if (i > 0 && i <= 86340) {										//	ok si entre 0 et 86340(23h59)
             config.FinJour = i;
             sauvConfig();															// sauvegarde en EEPROM
+            Alarm.disable(FinJour);
             FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
+            Alarm.enable(FinJour);
           }
         }
         message += F("Fin Journee = ");
@@ -1971,12 +1980,14 @@ void MajHeure(String smsdate) {
       if (abs(ecart) > 5) {
         // ArretSonnerie();	// Arret Sonnerie propre
         Alarm.disable(loopPrincipale);
+        Alarm.disable(DebutJour);
         Alarm.disable(FinJour);
         Alarm.disable(Auto_F);
 
         setTime(Nhour, Nminute, Nsecond, Nday, Nmonth, Nyear);
 
         Alarm.enable(loopPrincipale);
+        Alarm.enable(DebutJour);
         Alarm.enable(FinJour);
         if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
       }
@@ -2013,9 +2024,10 @@ void SignalVie() {
   Serial.println(F("Signal vie"));
   if (gsm) {
     MajHeure("");
-    envoieGroupeSMS(0, 0);
+    // envoieGroupeSMS(0, 0);
     Sim800.delAllSms();// au cas ou, efface tous les SMS envoyé/reçu
   }
+  action_wakeup_reason(4);
 }
 //---------------------------------------------------------------------------
 void sauvConfig() { // sauve configuration en EEPROM
@@ -2319,7 +2331,8 @@ void FinJournee() {
   FirstWakeup = true;
   digitalWrite(PinAlimLum , LOW); // couper alimentation LDR
   Serial.println(F("Fin de journee retour sleep"));
-  TIME_TO_SLEEP = DureeSleep(config.DebutJour - config.anticip);// xx mn avant
+  // TIME_TO_SLEEP = DureeSleep(config.DebutJour - config.anticip);// xx mn avant
+  calculTimeSleep();
   Sbidon  = F("FinJour, sleep for ");
   Sbidon += Hdectohhmm(TIME_TO_SLEEP);
   MajLog(F("Auto"), Sbidon);
@@ -2600,21 +2613,6 @@ void IntruD() { // Charge parametre Alarme Intrusion Nuit
 //---------------------------------------------------------------------------
 void DebutSleep() {
 
-  /* Garde fou si TIME_TO_SLEEP > 20H00 c'est une erreur, on impose 1H00 */
-  if (TIME_TO_SLEEP > 72000) {
-    TIME_TO_SLEEP = 3600;
-    Sbidon = F("jour ");
-    Sbidon += jour;
-    Sbidon = F(", Calendrier ");
-    Sbidon += calendrier[month()][day()];
-    Sbidon = F(", flagCirc ");
-    Sbidon += flagCircule;
-    MajLog(F("Auto"), Sbidon);
-    Sbidon = F("Attention erreur Sleep>20H00 ");
-    Sbidon += Hdectohhmm(TIME_TO_SLEEP);
-    MajLog(F("Auto"), Sbidon);
-  }
-
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
   Serial.print(F("Setup ESP32 to sleep for "));
   print_uint64_t(TIME_TO_SLEEP);
@@ -2677,24 +2675,30 @@ void action_wakeup_reason(byte wr) { // action en fonction du wake up
       break;
 
     case 4: // SP_SLEEP_WAKEUP_TIMER
-      /* jour noncirculé retour deep sleep pour RepeatWakeUp 1H00
-        verifier si wake up arrive avant fin journée marge 1mn*/
-      if (FirstWakeup) {
-        SignalVie();
+      if (FirstWakeup) { // premier wake up du jour avant DebutJour
+        // SignalVie();
+        // ne rien faire, attendre DebutJour
         FirstWakeup = false;
+        if (HActuelledec() > config.DebutJour) {
+          // premier lancement en journée
+          SignalVie();
+        }
+        break;
       }
-      if ((calendrier[month()][day()] ^ flagCircule)) { // jour circulé (&& jour)
-        // Nmax = config.Jour_Nmax; // parametre jour
+      if ((calendrier[month()][day()] ^ flagCircule) && jour) { // jour circulé & jour
         Sbidon = F("Jour circule ou demande circulation");
         Serial.println(Sbidon);
         MajLog(F("Auto"), Sbidon);
+        Feux = 1;
+        Allumage(); // Violet 1, Blanc 0
+        MajLog("Auto", "FCV");
+        envoieGroupeSMS(3, 0); // envoie serveur
 
       }
       else { // non circulé
         Sbidon = F("Jour noncircule ou nuit");
         Serial.println(Sbidon);
         MajLog(F("Auto"), Sbidon);
-        // Nmax = config.Nuit_Nmax; // parametre nuit
         calculTimeSleep();
         if (TIME_TO_SLEEP <= config.anticip) { // on continue sans sleep
           Sbidon = F("on continue sans sleep");
@@ -2746,7 +2750,22 @@ void calculTimeSleep() {
     Serial.println("");
   }
 
-  Sbidon = F("lance timer \"1H\" ");
+  /* Garde fou si TIME_TO_SLEEP > 20H00 c'est une erreur, on impose 1H00 */
+  if (TIME_TO_SLEEP > 72000) {
+    TIME_TO_SLEEP = 3600;
+    Sbidon = F("jour ");
+    Sbidon += jour;
+    Sbidon = F(", Calendrier ");
+    Sbidon += calendrier[month()][day()];
+    Sbidon = F(", flagCirc ");
+    Sbidon += flagCircule;
+    MajLog(F("Auto"), Sbidon);
+    Sbidon = F("Attention erreur Sleep>20H00 ");
+    Sbidon += Hdectohhmm(TIME_TO_SLEEP);
+    MajLog(F("Auto"), Sbidon);
+  }
+
+  Sbidon = F("lance timer : ");
   Sbidon += Hdectohhmm(TIME_TO_SLEEP);
   MajLog(F("Auto"), Sbidon);
 }
