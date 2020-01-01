@@ -73,7 +73,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 996554 76%, 47752 14% sur PC
+  Arduino IDE 1.8.10 : 996778 76%, 47752 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -2183,48 +2183,59 @@ void appendFile(fs::FS &fs, const char * path, const char * message) {
 }
 //---------------------------------------------------------------------------
 void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
-  /* verification de la taille du fichier */
-  File f = SPIFFS.open(filelog, "r");
-  Serial.print(F("Taille fichier log = ")), Serial.println(f.size());
-  // Serial.print(Id),Serial.print(","),Serial.println(Raison);
-  if (f.size() > 150000 && !FileLogOnce) {
-    /* si trop grand on efface */
-    FileLogOnce = true;
-    messageId();
-    message += F("Fichier log presque plein\n");
-    message += String(f.size());
-    message += F("\nFichier sera efface a 300000");
-    if (gsm) {
-      String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
-      char num[13];
-      number.toCharArray(num, 13);
-      EnvoyerSms(num, true);
+  if(SPIFFS.exists(filelog)){
+    /* verification de la taille du fichier */
+    File f = SPIFFS.open(filelog, "r");
+    Serial.print(F("Taille fichier log = ")), Serial.println(f.size());
+    // Serial.print(Id),Serial.print(","),Serial.println(Raison);
+    if (f.size() > 150000 && !FileLogOnce) {
+      /* si trop grand on efface */
+      FileLogOnce = true;
+      messageId();
+      message += F("Fichier log presque plein\n");
+      message += String(f.size());
+      message += F("\nFichier sera efface a 300000");
+      if (gsm) {
+        String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
+        char num[13];
+        number.toCharArray(num, 13);
+        EnvoyerSms(num, true);
+      }
     }
-  }
-  else if (f.size() > 300000 && FileLogOnce) { // 292Ko 75000 lignes
-    messageId();
-    message += F("Fichier log plein\n");
-    message += String(f.size());
-    message += F("\nFichier efface");
-    if (gsm) {
-      String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
-      char num[13];
-      number.toCharArray(num, 13);
-      EnvoyerSms(num, true);
+    else if (f.size() > 300000 && FileLogOnce) { // 292Ko 75000 lignes
+      messageId();
+      message += F("Fichier log plein\n");
+      message += String(f.size());
+      message += F("\nFichier efface");
+      if (gsm) {
+        String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
+        char num[13];
+        number.toCharArray(num, 13);
+        EnvoyerSms(num, true);
+      }
+      SPIFFS.remove(filelog);
+      FileLogOnce = false;
     }
-    SPIFFS.remove(filelog);
-    FileLogOnce = false;
+    f.close();
+    /* preparation de la ligne */
+    char Cbidon[101]; // 100 char maxi
+    sprintf(Cbidon, "%02d/%02d/%4d %02d:%02d:%02d", day(), month(), year(), hour(), minute(), second());
+    Id = ";" + Id + ";";
+    Raison += "\n";
+    strcat(Cbidon, Id.c_str());
+    strcat(Cbidon, Raison.c_str());
+    Serial.println(Cbidon);
+    appendFile(SPIFFS, filelog, Cbidon);
   }
-  f.close();
-  /* preparation de la ligne */
-  char Cbidon[101]; // 100 char maxi
-  sprintf(Cbidon, "%02d/%02d/%4d %02d:%02d:%02d", day(), month(), year(), hour(), minute(), second());
-  Id = ";" + Id + ";";
-  Raison += "\n";
-  strcat(Cbidon, Id.c_str());
-  strcat(Cbidon, Raison.c_str());
-  Serial.println(Cbidon);
-  appendFile(SPIFFS, filelog, Cbidon);
+  else{
+    char Cbidon[101]; // 100 char maxi
+    char dump[2] = {'\n'};
+    sprintf(Cbidon, "%02d/%02d/%4d %02d:%02d:%02d;", day(), month(), year(), hour(), minute(), second());
+    strcat(Cbidon,config.Idchar);
+    strcat(Cbidon,dump);
+    appendFile(SPIFFS, filelog, Cbidon);
+    Serial.print("nouveau fichier log:"),Serial.println(Cbidon);
+  }
 }
 //---------------------------------------------------------------------------
 void EnregistreCalendrier() { // remplace le calendrier
