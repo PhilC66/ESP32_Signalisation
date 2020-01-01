@@ -73,7 +73,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 996066 75%, 47752 14% sur PC
+  Arduino IDE 1.8.10 : 996554 76%, 47752 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -136,7 +136,7 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V1-2";
+String ver        = "V1-3";
 int    Magique    = 11;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
@@ -553,7 +553,7 @@ void Acquisition() {
       nalaTension = 0;
     }
   }
-  else if (BattPBpct(TensionBatterie, 6) > 80 && VUSB > 4800) { //  && VUSB < 5400	//hysteresis et tempo sur Alarme Batterie
+  else if (BattPBpct(TensionBatterie, 6) > 80 && VUSB > 4500) { //  && VUSB < 5400	//hysteresis et tempo sur Alarme Batterie
     nRetourTension ++;
     if (nRetourTension == 4) {
       FlagAlarmeTension = false;
@@ -1248,7 +1248,7 @@ fin_i:
           }
           // Serial.print("mois:"),Serial.println(m);
           EnregistreCalendrier(); // Sauvegarde en SPIFFS
-          message += F("Mise a jour calendrier mois:");
+          message += F("Mise a jour calendrier \nmois:");
           message += m;
           message += " OK (json)";
         }
@@ -1341,13 +1341,15 @@ fin_i:
         EnvoyerSms(number, sms);
         if (ok) {
           if (sms)EffaceSMS(slot);
-          action_wakeup_reason(4);
+          SignalVie();
+          // action_wakeup_reason(4);
         }
       }
       else if (textesms == F("NONCIRCULE")) {
         bool ok = false;
         /* demande passer en mode nonCirculé pour le jour courant,
-          sans modification calendrier enregistré en SPIFFS */
+          sans modification calendrier enregistré en SPIFFS 
+          extinction Feux*/
         if (calendrier[month()][day()] ^ flagCircule) {
           // calendrier[month()][day()] = 0;
           message += F("OK, NonCircule");
@@ -1360,7 +1362,10 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
         if (ok) {
-          if (sms)EffaceSMS(slot);
+          if (sms){
+            EffaceSMS(slot);
+          }
+          Extinction();
           action_wakeup_reason(4);
         }
       }
@@ -1521,7 +1526,6 @@ fin_i:
       }
       else if (textesms.indexOf(Id.substring(5, 9)) == 1) { // cherche CVXX
         if (textesms.indexOf("D") == 0) {
-          Feux = 0;
           Extinction(); // Violet 0, Blanc 0
           MajLog(nom, "DCV");
         }
@@ -2027,6 +2031,17 @@ void SignalVie() {
     // envoieGroupeSMS(0, 0);
     Sim800.delAllSms();// au cas ou, efface tous les SMS envoyé/reçu
   }
+
+  if ((calendrier[month()][day()] ^ flagCircule) && jour) { // jour circulé
+    // 11 jour pour cas lancement de nuit pas d'allumage
+    Sbidon = F("Jour circule ou demande circulation");
+    Serial.println(Sbidon);
+    MajLog(F("Auto"), Sbidon);
+    Feux = 1;
+    Allumage(); // Violet 1, Blanc 0
+    MajLog("Auto", "FCV");
+  }
+  envoieGroupeSMS(0, 0);
   action_wakeup_reason(4);
 }
 //---------------------------------------------------------------------------
@@ -2330,13 +2345,13 @@ void FinJournee() {
   flagCircule = false;
   FirstWakeup = true;
   digitalWrite(PinAlimLum , LOW); // couper alimentation LDR
+  if (Allume)Extinction();
   Serial.println(F("Fin de journee retour sleep"));
-  // TIME_TO_SLEEP = DureeSleep(config.DebutJour - config.anticip);// xx mn avant
-  calculTimeSleep();
+  TIME_TO_SLEEP = DureeSleep(config.DebutJour - config.anticip);// xx mn avant
+  // calculTimeSleep();
   Sbidon  = F("FinJour, sleep for ");
   Sbidon += Hdectohhmm(TIME_TO_SLEEP);
   MajLog(F("Auto"), Sbidon);
-  if (Allume)Extinction();
   DebutSleep();
 }
 //---------------------------------------------------------------------------
@@ -2686,21 +2701,20 @@ void action_wakeup_reason(byte wr) { // action en fonction du wake up
         break;
       }
       if ((calendrier[month()][day()] ^ flagCircule) && jour) { // jour circulé & jour
-        Sbidon = F("Jour circule ou demande circulation");
-        Serial.println(Sbidon);
-        MajLog(F("Auto"), Sbidon);
-        Feux = 1;
-        Allumage(); // Violet 1, Blanc 0
-        MajLog("Auto", "FCV");
-        envoieGroupeSMS(3, 0); // envoie serveur
-
+        // Sbidon = F("Jour circule ou demande circulation");
+        // Serial.println(Sbidon);
+        // MajLog(F("Auto"), Sbidon);
+        // Feux = 1;
+        // Allumage(); // Violet 1, Blanc 0
+        // MajLog("Auto", "FCV");
+        // envoieGroupeSMS(0, 0);
       }
       else { // non circulé
         Sbidon = F("Jour noncircule ou nuit");
         Serial.println(Sbidon);
         MajLog(F("Auto"), Sbidon);
         calculTimeSleep();
-        if (TIME_TO_SLEEP <= config.anticip) { // on continue sans sleep
+        if (TIME_TO_SLEEP <= config.anticip) { // on continue sans sleep attente finjour
           Sbidon = F("on continue sans sleep");
           Serial.println(Sbidon);
           MajLog(F("Auto"), Sbidon);
