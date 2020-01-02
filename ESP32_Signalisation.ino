@@ -73,7 +73,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 996778 76%, 47752 14% sur PC
+  Arduino IDE 1.8.10 : 996838 76%, 47752 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -1652,26 +1652,41 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      else if (textesms.indexOf(F("PARAM")) == 0) {
-        if (textesms.substring(5, 6) == "=") {
-          // a faire traitement json en reception
+      else if (textesms.indexOf(F("PARAM")) >= 0) {
+        if (textesms.substring(8, 9) == ":") {
+          // json en reception sans lumlut
+          DynamicJsonDocument doc(400);
+          deserializeJson(doc, textesms);
+          JsonObject param = doc["PARAM"];
+          config.SlowBlinker = param["SLOWBLINKER"];
+          config.FastBlinker = param["FASTBLINKER"];
+          config.FastRater = param["FASTRATER"];
+          config.DebutJour = Hhmmtohdec(param["DEBUT"]);
+          config.FinJour = Hhmmtohdec(param["FIN"]);
+          config.AutoF = param["AUTOF"];
+          config.TempoAutoF = param["TEMPAUTOF"];
+          config.FBlcPWM = param["FBLCPWM"];
+          config.FVltPWM = param["FVLTPWM"];
+          config.LumAuto = param["LUMAUTO"];
+          sauvConfig();
         }
+
         // ne fonctionne pas
         // const size_t capacity = JSON_ARRAY_SIZE(11) + JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(11);
         // calculer taille https://arduinojson.org/v6/assistant/
         DynamicJsonDocument doc(500);
         JsonObject param = doc.createNestedObject("param");
 
-        param["slowblinker"] = config.SlowBlinker;//500;
-        param["fastblinker"] = config.FastBlinker;//150;
-        param["fastrater"] = config.FastRater;//1000;
-        param["debut"] = Hdectohhmm(config.DebutJour);//"09:00:00";
+        param["slowblinker"] = config.SlowBlinker;
+        param["fastblinker"] = config.FastBlinker;
+        param["fastrater"] = config.FastRater;
+        param["debut"] = Hdectohhmm(config.DebutJour);
         param["fin"] = Hdectohhmm(config.FinJour);
-        param["autof"] = config.AutoF;//0;
-        param["tempoautof"] = config.TempoAutoF;//3600;
-        param["fblcpwm"] = config.FBlcPWM;//75;
-        param["fvltpwm"] = config.FVltPWM;//100;
-        param["lumauto"] = config.LumAuto;//0;
+        param["autof"] = config.AutoF;
+        param["tempoautof"] = config.TempoAutoF;
+        param["fblcpwm"] = config.FBlcPWM;
+        param["fvltpwm"] = config.FVltPWM;
+        param["lumauto"] = config.LumAuto;
 
         JsonArray param_lumlut = param.createNestedArray("lumlut");
         for (int i = 0; i < 11; i++) {
@@ -2229,10 +2244,9 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
   }
   else{
     char Cbidon[101]; // 100 char maxi
-    char dump[2] = {'\n'};
     sprintf(Cbidon, "%02d/%02d/%4d %02d:%02d:%02d;", day(), month(), year(), hour(), minute(), second());
     strcat(Cbidon,config.Idchar);
-    strcat(Cbidon,dump);
+    strcat(Cbidon,fl.c_str());
     appendFile(SPIFFS, filelog, Cbidon);
     Serial.print("nouveau fichier log:"),Serial.println(Cbidon);
   }
@@ -2556,7 +2570,6 @@ void OuvrirFichierCalibration() { // Lecture fichier calibration
 }
 //---------------------------------------------------------------------------
 void Recordcalib() { // enregistrer fichier calibration en SPIFFS
-
   // Serial.print(F("Coeff T Batterie = ")),Serial.println(CoeffTension1);
   // Serial.print(F("Coeff T Proc = "))	  ,Serial.println(CoeffTension2);
   // Serial.print(F("Coeff T VUSB = "))		,Serial.println(CoeffTension3);
@@ -2566,10 +2579,10 @@ void Recordcalib() { // enregistrer fichier calibration en SPIFFS
   f.println(CoeffTension[2]);
   f.println(CoeffTension[3]);
   f.close();
-
 }
 //---------------------------------------------------------------------------
 String Hdectohhmm(long Hdec) {
+  // convert heure decimale en hh:mm:ss
   String hhmm;
   if (int(Hdec / 3600) < 10) hhmm = "0";
   hhmm += int(Hdec / 3600);
@@ -2580,6 +2593,15 @@ String Hdectohhmm(long Hdec) {
   if (int((Hdec % 3600) % 60) < 10) hhmm += "0";
   hhmm += int((Hdec % 3600) % 60);
   return hhmm;
+}
+//---------------------------------------------------------------------------
+long Hhmmtohdec(String h){
+  // convert heure hh:mm:ss en decimale
+  int H = h.substring(0,2).toInt();
+  int M = h.substring(3,5).toInt();
+  int S = h.substring(6,8).toInt();
+  long hms = H*3600 + M*60 + S;
+  return hms;
 }
 //---------------------------------------------------------------------------
 void DesActiveInterrupt() {
