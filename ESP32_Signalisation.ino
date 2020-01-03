@@ -73,7 +73,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 996838 76%, 47752 14% sur PC
+  Arduino IDE 1.8.10 : 996898 76%, 47752 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -136,7 +136,7 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V1-3";
+String ver        = "V1-4";
 int    Magique    = 11;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
@@ -1653,49 +1653,82 @@ fin_i:
         EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("PARAM")) >= 0) {
-        if (textesms.substring(8, 9) == ":") {
-          // json en reception sans lumlut
-          DynamicJsonDocument doc(400);
-          deserializeJson(doc, textesms);
-          JsonObject param = doc["PARAM"];
-          config.SlowBlinker = param["SLOWBLINKER"];
-          config.FastBlinker = param["FASTBLINKER"];
-          config.FastRater = param["FASTRATER"];
-          config.DebutJour = Hhmmtohdec(param["DEBUT"]);
-          config.FinJour = Hhmmtohdec(param["FIN"]);
-          config.AutoF = param["AUTOF"];
-          config.TempoAutoF = param["TEMPAUTOF"];
-          config.FBlcPWM = param["FBLCPWM"];
-          config.FVltPWM = param["FVLTPWM"];
-          config.LumAuto = param["LUMAUTO"];
-          sauvConfig();
+        //message param divisé en 2 trop long depasse long 1sms 160c
+        bool erreur = false;
+        // Serial.print("position X:"),Serial.println(textesms.substring(7, 8));
+        if(textesms.substring(7, 8) == "1"){ // PARAM1
+        // Serial.print("position ::"),Serial.println(textesms.substring(9, 10));
+          if (textesms.substring(9, 10) == ":") {
+            // json en reception sans lumlut
+            DynamicJsonDocument doc(200);
+            DeserializationError err = deserializeJson(doc, textesms);
+            if(err){
+              erreur = true;
+            }
+            else{
+              // Serial.print(F("Deserialization succeeded"));
+              JsonObject param = doc["PARAM1"];
+              config.SlowBlinker = param["SLOWBLINKER"];
+              config.FastBlinker = param["FASTBLINKER"];
+              config.FastRater = param["FASTRATER"];
+              config.DebutJour = Hhmmtohdec(param["DEBUT"]);
+              config.FinJour = Hhmmtohdec(param["FIN"]);
+              sauvConfig();
+            }
+          }
+          else{
+            erreur = true;
+          }
         }
-
-        // ne fonctionne pas
-        // const size_t capacity = JSON_ARRAY_SIZE(11) + JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(11);
-        // calculer taille https://arduinojson.org/v6/assistant/
-        DynamicJsonDocument doc(500);
-        JsonObject param = doc.createNestedObject("param");
-
-        param["slowblinker"] = config.SlowBlinker;
-        param["fastblinker"] = config.FastBlinker;
-        param["fastrater"] = config.FastRater;
-        param["debut"] = Hdectohhmm(config.DebutJour);
-        param["fin"] = Hdectohhmm(config.FinJour);
-        param["autof"] = config.AutoF;
-        param["tempoautof"] = config.TempoAutoF;
-        param["fblcpwm"] = config.FBlcPWM;
-        param["fvltpwm"] = config.FVltPWM;
-        param["lumauto"] = config.LumAuto;
-
-        JsonArray param_lumlut = param.createNestedArray("lumlut");
-        for (int i = 0; i < 11; i++) {
-          param_lumlut.add(TableLum[i][1]);
+        else if(textesms.substring(7, 8) == "2"){ // PARAM2
+          if (textesms.substring(9, 10) == ":") {
+            // json en reception sans lumlut
+            DynamicJsonDocument doc(200);
+            DeserializationError err = deserializeJson(doc, textesms);
+            if(err){
+              erreur = true;
+            }
+            else{
+              // Serial.print(F("Deserialization succeeded"));
+              JsonObject param = doc["PARAM2"];
+              config.LumAuto = param["LUMAUTO"];
+              config.FBlcPWM = param["FBLCPWM"];
+              config.FVltPWM = param["FVLTPWM"];
+              config.AutoF = param["AUTOF"];
+              config.TempoAutoF = param["TEMPOAUTOF"];
+              sauvConfig();
+            }
+          }
         }
-        String jsonbidon;
-        serializeJson(doc, jsonbidon);
-        // serializeJson(doc, Serial);
-        message += jsonbidon;
+        if(!erreur){
+          // ne fonctionne pas
+          // const size_t capacity = JSON_ARRAY_SIZE(11) + JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(11);
+          // calculer taille https://arduinojson.org/v6/assistant/
+          DynamicJsonDocument doc(500);
+          JsonObject param = doc.createNestedObject("param");
+          param["slowblinker"] = config.SlowBlinker;
+          param["fastblinker"] = config.FastBlinker;
+          param["fastrater"] = config.FastRater;
+          param["debut"] = Hdectohhmm(config.DebutJour);
+          param["fin"] = Hdectohhmm(config.FinJour);
+          param["autof"] = config.AutoF;
+          param["tempoautof"] = config.TempoAutoF;
+          param["fblcpwm"] = config.FBlcPWM;
+          param["fvltpwm"] = config.FVltPWM;
+          param["lumauto"] = config.LumAuto;
+
+          JsonArray param_lumlut = param.createNestedArray("lumlut");
+          for (int i = 0; i < 11; i++) {
+            param_lumlut.add(TableLum[i][1]);
+          }
+          String jsonbidon;
+          serializeJson(doc, jsonbidon);
+          // serializeJson(doc, Serial);
+          message += jsonbidon;
+        }
+        else{
+          message += "erreur json";
+        }
         message += fl;
         EnvoyerSms(number, sms);
       }
