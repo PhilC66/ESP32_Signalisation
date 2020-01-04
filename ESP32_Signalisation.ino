@@ -73,7 +73,7 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 996898 76%, 47752 14% sur PC
+  Arduino IDE 1.8.10 : 998510 76%, 47752 14% sur PC
   Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
 
 */
@@ -1165,10 +1165,15 @@ fin_i:
           int f = textesms.lastIndexOf("}");
           // Serial.print("pos }:"),Serial.println(f);
           // Serial.print("json:"),Serial.print(textesms.substring(0,f+1)),Serial.println(".");
-          deserializeJson(doc, textesms.substring(0, f + 1));
-          JsonArray LUMLUT = doc["LUMLUT"];
-          for (int i = 0; i < 11; i++) {
-            TableLum[i][1] = LUMLUT[i];
+          DeserializationError err = deserializeJson(doc, textesms.substring(0, f + 1));
+          if(!err){
+            JsonArray LUMLUT = doc["LUMLUT"];
+            for (int i = 0; i < 11; i++) {
+              TableLum[i][1] = LUMLUT[i];
+            }
+          }
+          else{
+            flag = false; // erreur json
           }
         }
         else if ((textesms.indexOf(char(61))) == 6) { // =
@@ -1240,17 +1245,23 @@ fin_i:
           int f = textesms.lastIndexOf("}");
           // Serial.print("pos }:"),Serial.println(f);
           // Serial.print("json:"),Serial.print(textesms.substring(0,f+1)),Serial.println(".");,1,1,1,1,1,0,0,0,0,0,0]}";
-          deserializeJson(doc, textesms.substring(0, f + 1));
-          int m = doc["MOIS"]; // 12
-          JsonArray jour = doc["JOUR"];
-          for (int j = 1; j < 32; j++) {
-            calendrier[m][j] = jour[j - 1];
+          DeserializationError err = deserializeJson(doc, textesms.substring(0, f + 1));
+          if(!err){
+            int m = doc["MOIS"]; // 12
+            JsonArray jour = doc["JOUR"];
+            for (int j = 1; j < 32; j++) {
+              calendrier[m][j] = jour[j - 1];
+            }
+            // Serial.print("mois:"),Serial.println(m);
+            EnregistreCalendrier(); // Sauvegarde en SPIFFS
+            message += F("Mise a jour calendrier \nmois:");
+            message += m;
+            message += " OK (json)";
           }
-          // Serial.print("mois:"),Serial.println(m);
-          EnregistreCalendrier(); // Sauvegarde en SPIFFS
-          message += F("Mise a jour calendrier \nmois:");
-          message += m;
-          message += " OK (json)";
+          else{
+            message += " erreur json ";
+            flag = false;
+          }
         }
         else { // message normal mois=12,31*0/1
           byte p1 = textesms.indexOf(char(61)); // =
@@ -1674,6 +1685,12 @@ fin_i:
               config.DebutJour = Hhmmtohdec(param["DEBUT"]);
               config.FinJour = Hhmmtohdec(param["FIN"]);
               sauvConfig();
+              Alarm.disable(FinJour);
+              FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
+              Alarm.enable(FinJour);
+              Alarm.disable(DebutJour);
+              FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
+              Alarm.enable(DebutJour);
             }
           }
           else{
