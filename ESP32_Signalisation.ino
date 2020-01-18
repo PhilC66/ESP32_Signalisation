@@ -73,8 +73,11 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 998510 76%, 47752 14% sur PC
-  Arduino IDE 1.8.10 : 980xxx 75%, 47488 14% sur raspi
+  Arduino IDE 1.8.10 : 998338 76%, 47752 14% sur PC
+  Arduino IDE 1.8.10 : 998318 76%, 47488 14% sur raspi
+  
+  06/01/2020
+  installation Cv65 V1-4
 
 */
 
@@ -1240,6 +1243,7 @@ fin_i:
           demande calendrier pour un mois donné ; format : MOIS=mm? */
         bool flag = true; // validation du format
         bool W = true; // true Write, false Read
+        int m = 0;
         if (textesms.indexOf("{") == 0) { // json
           DynamicJsonDocument doc(540);
           int f = textesms.lastIndexOf("}");
@@ -1247,16 +1251,16 @@ fin_i:
           // Serial.print("json:"),Serial.print(textesms.substring(0,f+1)),Serial.println(".");,1,1,1,1,1,0,0,0,0,0,0]}";
           DeserializationError err = deserializeJson(doc, textesms.substring(0, f + 1));
           if(!err){
-            int m = doc["MOIS"]; // 12
+            m = doc["MOIS"]; // 12
             JsonArray jour = doc["JOUR"];
             for (int j = 1; j < 32; j++) {
               calendrier[m][j] = jour[j - 1];
             }
             // Serial.print("mois:"),Serial.println(m);
             EnregistreCalendrier(); // Sauvegarde en SPIFFS
-            message += F("Mise a jour calendrier \nmois:");
-            message += m;
-            message += " OK (json)";
+            // message += F("Mise a jour calendrier \nmois:");
+            // message += m;
+            // message += " OK (json)";
           }
           else{
             message += " erreur json ";
@@ -1271,7 +1275,7 @@ fin_i:
             W = false;
           }
 
-          byte m = textesms.substring(p1 + 1, p2).toInt(); // mois
+          m = textesms.substring(p1 + 1, p2).toInt(); // mois
 
           // printf("p1=%d,p2=%d\n",p1,p2);
           // Serial.println(textesms.substring(p1+1,p2).toInt());
@@ -1292,45 +1296,46 @@ fin_i:
                 // Serial.print(textesms.substring(p2+i,p2+i+1));
               }
               EnregistreCalendrier(); // Sauvegarde en SPIFFS
-              message += F("Mise a jour calendrier mois:");
-              message += m;
-              message += " OK";
+              // message += F("Mise a jour calendrier mois:");
+              // message += m;
+              // message += " OK";
             }
           }
-          else if (flag) { // ? demande calendrier pour un mois donné
-            if (smsserveur || !sms) {
-              // si serveur reponse json  {"mois":12,"jour":[1,2,4,5,6 .. 31]}
-              DynamicJsonDocument doc(540);
-              doc["mois"] = m;
-              JsonArray jour = doc.createNestedArray("jour");
-              for (int i = 1; i < 32; i++) {
-                jour.add(calendrier[m][i]);
-              }
-              String jsonbidon;
-              serializeJson(doc, jsonbidon);
-              message += jsonbidon;
-              // message +="{\"mois\":" + String(m) + "," +fl;
-              // message += "\"jour\":[";
-              // for (int i = 1; i < 32 ; i++){
-              // message += String(calendrier[m][i]);
-              // if (i < 31) message += ",";
-              // }
-              // message += "]}";
-            }
-            else {
-              message += F("mois = ");
-              message += m;
-              message += fl;
-              for (int i = 1; i < 32 ; i++) {
-                message += calendrier[m][i];
-                if ((i % 5)  == 0) message += " ";
-                if ((i % 10) == 0) message += fl;
-              }
-            }
+          if(!flag) {
+            // printf("flag=%d,W=%d\n",flag,W);
+            message += " erreur format ";
           }
         }
-        if (!flag) {
-          message += F("Format non reconnu !");
+        if (flag) { // demande calendrier pour un mois donné
+          if (smsserveur || !sms) {
+            // si serveur reponse json  {"mois":12,"jour":[1,2,4,5,6 .. 31]}
+            DynamicJsonDocument doc(540);
+            doc["mois"] = m;
+            JsonArray jour = doc.createNestedArray("jour");
+            for (int i = 1; i < 32; i++) {
+              jour.add(calendrier[m][i]);
+            }
+            String jsonbidon;
+            serializeJson(doc, jsonbidon);
+            message += jsonbidon;
+            // message +="{\"mois\":" + String(m) + "," +fl;
+            // message += "\"jour\":[";
+            // for (int i = 1; i < 32 ; i++){
+            // message += String(calendrier[m][i]);
+            // if (i < 31) message += ",";
+            // }
+            // message += "]}";
+          }
+          else {
+            message += F("mois = ");
+            message += m;
+            message += fl;
+            for (int i = 1; i < 32 ; i++) {
+              message += calendrier[m][i];
+              if ((i % 5)  == 0) message += " ";
+              if ((i % 10) == 0) message += fl;
+            }
+          }
         }
         message += fl;
         EnvoyerSms(number, sms);
