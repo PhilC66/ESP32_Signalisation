@@ -73,8 +73,16 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 998338 76%, 47752 14% sur PC
-  Arduino IDE 1.8.10 : 998318 76%, 47488 14% sur raspi
+  Arduino IDE 1.8.10 : 998466 76%, 47752 14% sur PC
+  Arduino IDE 1.8.10 :  76%,  14% sur raspi
+
+  02/06/2020
+  V1-41 pas installé
+  1- maj valeur defaut anticip=2700
+     nouveau magic
+  2- corection bug général, pour changer un Alarm.timerRepeat et Alarm.alarmRepeat,
+     il faut utiliser la fonction Alarm.write(Id, durée)
+     inversion message debut jour
   
   06/01/2020
   installation Cv65 V1-4
@@ -139,8 +147,8 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V1-4";
-int    Magique    = 11;
+String ver        = "V1-41";
+int    Magique    = 10;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -326,8 +334,8 @@ void setup() {
     */
     Serial.println(F("Nouvelle Configuration !"));
     config.magic         = Magique;
-    config.anticip       = 90;
-    config.DebutJour     = 9  * 60 * 60;
+    config.anticip       = 2700;
+    config.DebutJour     = 8  * 60 * 60;
     config.FinJour       = 19 * 60 * 60;
     config.RepeatWakeUp  = 60 * 60;
     config.timeoutWifi   = 10 * 60;
@@ -434,7 +442,7 @@ void setup() {
   if (Feux != 0) { // si une valeur Feux different de 0 en memoire RTC, on Allume les feux
     Allumage();
   }
-
+  MajLog("Auto","Lancement");
   // SelftestFeux();
 }
 //---------------------------------------------------------------------------
@@ -849,8 +857,9 @@ void traite_sms(byte slot) {
         message += F("TimeOut Wifi (s) = ");
         message += config.timeoutWifi;
         message += fl;
+        EnvoyerSms(number, sms);
       }
-      if (textesms.indexOf(F("WIFIOFF")) > -1) { // Arret Wifi
+      else if (textesms.indexOf(F("WIFIOFF")) > -1) { // Arret Wifi
         message += F("Wifi off");
         message += fl;
         EnvoyerSms(number, sms);
@@ -1040,7 +1049,8 @@ fin_i:
             config.DebutJour = i;
             sauvConfig();                               // sauvegarde en EEPROM
             Alarm.disable(DebutJour);
-            FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
+            Alarm.write(DebutJour,config.DebutJour);
+            // FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
             Alarm.enable(DebutJour);
             AIntru_HeureActuelle();
           }
@@ -1076,7 +1086,8 @@ fin_i:
             config.FinJour = i;
             sauvConfig();															// sauvegarde en EEPROM
             Alarm.disable(FinJour);
-            FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
+            Alarm.write(FinJour,config.FinJour);
+            // FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
             Alarm.enable(FinJour);
           }
         }
@@ -1691,10 +1702,12 @@ fin_i:
               config.FinJour = Hhmmtohdec(param["FIN"]);
               sauvConfig();
               Alarm.disable(FinJour);
-              FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
+              Alarm.write(FinJour,config.FinJour);
+              // FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
               Alarm.enable(FinJour);
               Alarm.disable(DebutJour);
-              FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
+              Alarm.write(DebutJour,config.DebutJour);
+              // FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
               Alarm.enable(DebutJour);
             }
           }
