@@ -73,16 +73,17 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 998466 76%, 47752 14% sur PC
+  Arduino IDE 1.8.10 : 998474 76%, 47752 14% sur PC
   Arduino IDE 1.8.10 :  76%,  14% sur raspi
 
   02/06/2020
-  V1-41 installé 11/07/2020 CV45 CV46
+  V1-41 installé 13/07/2020 CV45 CV46
   1- maj valeur defaut anticip=2700
      nouveau magic
   2- corection bug général, pour changer un Alarm.timerRepeat et Alarm.alarmRepeat,
      il faut utiliser la fonction Alarm.write(Id, durée)
      inversion message debut jour
+  3- AutoF applicable seulement O et S pas sur M
   
   06/01/2020
   installation Cv65 V1-4
@@ -740,8 +741,8 @@ void Extinction() {
 //---------------------------------------------------------------------------
 void AutoFermeture() {
   // fin de TempoAutoF
-  // Feux à F si Feux = O/M/S
-  if (Feux > 1) {
+  // Feux à F si Feux = O/S rien faire si M
+  if (Feux == 2 || Feux == 4) {
     Feux = 1;
     Allumage(); // Violet 1, Blanc 0
     envoieGroupeSMS(3, 0); // envoie serveur
