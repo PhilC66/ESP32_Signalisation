@@ -77,7 +77,7 @@
   Arduino IDE 1.8.10 :  76%,  14% sur raspi
 
   02/06/2020
-  V1-41 pas installé
+  V1-41 installé 11/07/2020 CV45 CV46
   1- maj valeur defaut anticip=2700
      nouveau magic
   2- corection bug général, pour changer un Alarm.timerRepeat et Alarm.alarmRepeat,
@@ -1170,7 +1170,7 @@ fin_i:
       else if (textesms.indexOf(F("LUMLUT")) > -1) { // Luminosité Look Up Table
         // format valeur de luminosité Feux pour chaque valeur luminosite ambiante
         // de 100 à 0 pas de 10
-        // LUMLUT=100,90,80,70,60,50,40,30,20,10,10
+        // LUMLUT=95,90,80,75,60,50,40,30,30,30,30
         bool flag = true; // validation du format
         byte nv = 0; // compteur virgule
         byte p1 = 0; // position virgule
