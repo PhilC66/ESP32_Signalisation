@@ -81,7 +81,7 @@
      sur reception O,S la commande n'est prise en compte que si entrée 1 fermée(taquet Ouvert)
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 1011502 77%, 47888 14% sur PC
+  Arduino IDE 1.8.10 : 1011466 77%, 47888 14% sur PC
   Arduino IDE 1.8.10 :  76%,  14% sur raspi
 
   02/06/2020
@@ -506,21 +506,6 @@ void loop() {
     }
   }
 
-  // if (IRQ_Cpt_Ip1 > 0 && config.Ip1) {
-    // Serial.print(F("Interruption : "));
-    // Serial.println(IRQ_Cpt_Ip1);
-    // Feux = 3; // Violet 0, Blanc Manoeuvre Cli lent
-    // MajLog("Manuel", "Bp local");
-    // Allumage();
-    // if (!FlagIp1) {
-      // FlagIp1 = true;
-      // envoieGroupeSMS(0, 0);			// envoie groupé
-    // }
-    // portENTER_CRITICAL(&mux);
-    // IRQ_Cpt_Ip1 = 0;
-    // portEXIT_CRITICAL(&mux);
-  // }
-
   static unsigned long startE1 = millis();
   // lecture entree Ip1
   if (config.Ip1 && digitalRead(PinIp1) == 0 && !FlagIp1){
@@ -727,7 +712,6 @@ void GestionFeux() {
       FastRate.attach_ms(config.FastRater, toggle);
       break;
       // default:
-      // GestionFeux(0);
   }
 }
 //---------------------------------------------------------------------------
@@ -1640,7 +1624,7 @@ fin_i:
             sauvConfig();
           }
         }
-        Allumage();
+        // Allumage();
         message += "Blanc PWM =";
         message += config.FBlcPWM;
         message += "%";
@@ -1655,7 +1639,7 @@ fin_i:
             sauvConfig();
           }
         }
-        Allumage();
+        // Allumage();
         message += "Violet PWM =";
         message += config.FVltPWM;
         message += "%";
@@ -1670,7 +1654,7 @@ fin_i:
             sauvConfig();
           }
         }
-        Allumage();
+        // Allumage();
         message += "SlowBlinker =";
         message += config.SlowBlinker;
         message += "ms";
@@ -1685,7 +1669,7 @@ fin_i:
             sauvConfig();
           }
         }
-        Allumage();
+        // Allumage();
         message += "FastBlinker =";
         message += config.FastBlinker;
         message += "ms";
@@ -1700,7 +1684,7 @@ fin_i:
             sauvConfig();
           }
         }
-        Allumage();
+        // Allumage();
         message += "FastRater =";
         message += config.FastRater;
         message += "ms";
