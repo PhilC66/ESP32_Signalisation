@@ -5,11 +5,13 @@
   2 feux Violet et Blanc
   Etat des feux
               | Violet | Blanc | Feux | Cde
-  OFF         |    0   |   0   |  0   |  D
+  OFF         |    0   |   0   |  0   |  D Feux D + Tqt Ouvert (si Tqt)
   Violet Fixe |    1   |   0   |  1   |  F
   Blanc Fixe  |    0   |   1   |  2   |  O
   Blanc Cli 1 |    0   |  Cli1 |  3   |  M
   Blanc Cli 2 |    0   |  Cli2 |  4   |  S
+  Carré Tqt F |    1   |   0   |  5   |  C pas de cde, affichage seulement
+  Carré Tqt O |    0   |   0   |  6   |  Z pas de cde, Feux D + Tqt Fermé
 
   cadence clignotant parametrable
   SlowBlinker = 500 Cli1 0.5s ON, 0.5s OFF
@@ -28,18 +30,12 @@
 
 	si jour circulé
   on continue normalement
-  en fin de journée retour sleep jusqu'a 06h59
+  en fin de journée retour sleep jusqu'a debut
 
   si non circulé,
   retour SIM800 et ESP32 en sleep reveil toute les heures
   au reveil attendre au moins 30s pour que les SMS arrivent,
   quand plus de SMS et traitement retour sleep 1H00
-
-  mode normal
-  SIM800 en reception
-  entrees externes,
-  Ip1 local demande Blanc Cli1 sur interruption ESP32
-  Ip2 a definir
 
   Surveillance Batterie solaire
 	Adc interne instable 2 à 3.5% erreurs!
@@ -77,12 +73,13 @@
   15/09/2020
   V2-1 pas encore installé
   1- upload log sur demande par sms
-  2- entrée 1 contact taquet ouvert pour Cv65
-     sur reception O,S la commande n'est prise en compte que si entrée 1 fermée(taquet Ouvert)
+  2- entrée E1 contact taquet ouvert pour Cv65
+     sur reception O,S,M la commande n'est prise en compte que si E1 fermée(taquet Ouvert)
+  3- calibration possible par sms idem Autorail
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 1011466 77%, 47888 14% sur PC
-  Arduino IDE 1.8.10 :  76%,  14% sur raspi
+  Arduino IDE 1.8.10 : 1014082 77%, 47928 14% sur PC
+  Arduino IDE 1.8.10 : 1014058 77%, 47928 14% sur raspi
 
   02/06/2020
   V1-41 installé 13/07/2020 CV45 CV46
@@ -157,7 +154,7 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V2-1x";
+String ver        = "V2-1";
 int    Magique    = 11;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
@@ -190,11 +187,15 @@ RTC_DATA_ATTR bool FileLogOnce             = false; // true si log > seuil alert
 
 bool FlagAlarme24V           = false; // Alarme tension 24V Allumage
 bool FlagLastAlarme24V       = false;
-bool FlagIp1                 = false; // Entrée 1 activée
+bool FlagTqt                 = false; // Position Taquet false = fermé, entree=0
+bool FlagLastTqt             = false; // memo last etat
 bool FlagIp2                 = false; // Entrée 2 activée
 bool FlagReset = false;       // Reset demandé
 bool jour      = false;				// jour = true, nuit = false
 bool gsm       = true;        // carte GSM presente utilisé pour test sans GSM seulement
+
+String Memo_Demande_Feux[3]="";  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4)
+bool FlagDemande_Feux = false;   // si demande encours = true
 
 int CoeffTension[4];          // Coeff calibration Tension
 int CoeffTensionDefaut = 7000;// Coefficient par defaut
@@ -213,11 +214,11 @@ int    TableLum[11][2];      // Table PWM en fonction Luminosité
 WebServer server(80);
 File UploadFile;
 
-typedef struct										// declaration structure  pour les log
+typedef struct               // declaration structure  pour les log
 {
-  char 		dt[10];									//	DateTime 0610-1702 9+1
-  char 		Act[2];									//	Action A/D/S/s 1+1
-  char 		Name[15];								//	14 car
+  char    dt[10];            // DateTime 0610-1702 9+1
+  char    Act[2];            // Action A/D/S/s 1+1
+  char    Name[15];          // 14 car
 } champ;
 champ record[5];
 
@@ -241,30 +242,30 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   bool    AutoF;           // true Retour automatique F si O/M/S apres TempoAutoF
   int     TempoAutoF;      // temps AutoF (s)
   char    Idchar[11];      // Id
-  char    apn[11];              // APN
-  char    gprsUser[11];         // user for APN
-  char    gprsPass[11];         // pass for APN
-  char    ftpServeur[26];       // serveur ftp
-  char    ftpUser[8];           // user ftp
-  char    ftpPass[16];          // pwd ftp
-  int     ftpPort;              // port ftp
+  char    apn[11];         // APN
+  char    gprsUser[11];    // user for APN
+  char    gprsPass[11];    // pass for APN
+  char    ftpServeur[26];  // serveur ftp
+  char    ftpUser[8];      // user ftp
+  char    ftpPass[16];     // pwd ftp
+  int     ftpPort;         // port ftp
 } ;
 config_t config;
 
-Ticker SlowBlink; // Clignotant lent
-Ticker FastBlink; // Clignotant rapide
-Ticker FastRate;  // Repetition Clignotant rapide
-Ticker ADC;       // Lecture des Adc
+Ticker SlowBlink;          // Clignotant lent
+Ticker FastBlink;          // Clignotant rapide
+Ticker FastRate;           // Repetition Clignotant rapide
+Ticker ADC;                // Lecture des Adc
 
-AlarmId loopPrincipale; // boucle principale
-AlarmId DebutJour;      // Debut journée
-AlarmId FinJour;        // Fin de journée retour deep sleep
-AlarmId Auto_F;         // Tempo AutoF
+AlarmId loopPrincipale;    // boucle principale
+AlarmId DebutJour;         // Debut journée
+AlarmId FinJour;           // Fin de journée retour deep sleep
+AlarmId Auto_F;            // Tempo AutoF
 
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
-HardwareSerial *SIM800Serial = &Serial2;// liaison serie FONA SIM800
-Sim800l Sim800;  											// to declare the library
+HardwareSerial *SIM800Serial = &Serial2; // liaison serie FONA SIM800
+Sim800l Sim800;                          // to declare the library
 
 //---------------------------------------------------------------------------
 void IRAM_ATTR handleInterruptIp1() { // Entrée 1
@@ -320,7 +321,7 @@ void setup() {
   }
 
   if (gsm) {
-    Serial.println(F("lancement SIM800"));
+    Serial.println("lancement SIM800");
     SIM800Serial->begin(9600); // 4800
     Sim800.begin();
   }
@@ -349,13 +350,13 @@ void setup() {
     		erreur lecture EEPROM ou carte vierge
     		on charge les valeurs par défaut
     */
-    Serial.println(F("Nouvelle Configuration !"));
+    Serial.println("Nouvelle Configuration !");
     config.magic         = Magique;
     config.anticip       = 2700;
     config.DebutJour     = 8  * 60 * 60;
     config.FinJour       = 19 * 60 * 60;
     config.RepeatWakeUp  = 60 * 60;
-    config.timeoutWifi   = 10 * 60;
+    config.timeoutWifi   = 15 * 60;
     config.Ip1           = false;
     config.Ip2           = false;
     config.SlowBlinker   = 500;
@@ -372,7 +373,7 @@ void setup() {
     // config.Pos_Pn_PB[1]  = 1;	// le premier numero du PB par defaut
     String temp          = "TPCF_CV65";
     temp.toCharArray(config.Idchar, 11);
-    String tempapn       = "sl2sfr";//"free";//"sl2sfr"
+    String tempapn       = "free";//"sl2sfr"
     String tempGprsUser  = "";
     String tempGprsPass  = "";
     config.ftpPort       = tempftpPort;
@@ -413,11 +414,11 @@ void setup() {
       type = "filesystem";
 
     // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-    Serial.print(F("Start updating "));
+    Serial.print("Start updating ");
     Serial.println(type);
   })
   .onEnd([]() {
-    Serial.println(F("End"));
+    Serial.println("End");
     delay(100);
     ResetHard();
   })
@@ -426,11 +427,11 @@ void setup() {
   })
   .onError([](ota_error_t error) {
     Serial.printf("Error[%u]: ", error);
-    if 			(error == OTA_AUTH_ERROR) 		Serial.println(F("Auth Failed"));
-    else if (error == OTA_BEGIN_ERROR) 		Serial.println(F("Begin Failed"));
-    else if (error == OTA_CONNECT_ERROR) 	Serial.println(F("Connect Failed"));
-    else if (error == OTA_RECEIVE_ERROR) 	Serial.println(F("Receive Failed"));
-    else if (error == OTA_END_ERROR) 			Serial.println(F("End Failed"));
+    if      (error == OTA_AUTH_ERROR)    Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR)   Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR)     Serial.println("End Failed");
   });
 
   if (!SPIFFS.begin(true)) {
@@ -466,6 +467,11 @@ void setup() {
   ActiveInterrupt();
 
   Serial.print(F("flag Circule :")), Serial.println(flagCircule);
+
+  if(!config.Ip1){ // si Ip1 innactive FlagTqt = taquet ouvert
+    FlagTqt = true;
+    FlagLastTqt = false;
+  }
 
   if (Feux != 0) { // si une valeur Feux different de 0 en memoire RTC, on Allume les feux
     Allumage();
@@ -507,16 +513,32 @@ void loop() {
   }
 
   static unsigned long startE1 = millis();
+  static bool FlagStartE1 = true;
   // lecture entree Ip1
-  if (config.Ip1 && digitalRead(PinIp1) == 0 && !FlagIp1){
-    if(millis() - startE1 > 2000){
-      FlagIp1 = true;
-      MajLog("Auto", "Ip1 Ferme");// taquet Ouvert
-      GestionFeux();
+  if (config.Ip1 && digitalRead(PinIp1) == 0 && !FlagTqt){
+    if(FlagStartE1){
+      FlagStartE1 = false;
+      startE1 = millis();
     }
-  } else if(config.Ip1 && digitalRead(PinIp1) == 1 && FlagIp1){
-      FlagIp1 = false;
-      MajLog("Auto", "Ip1 Ouvert");// taquet Fermé
+    if(millis() - startE1 > 5000){ // temporisation lecture
+      FlagTqt = true;
+      MajLog("Auto", "Taquet Ouvert");// taquet Ouvert
+      FlagStartE1 = true;
+    }
+  } else if(config.Ip1 && digitalRead(PinIp1) == 1 && FlagTqt){
+    if(FlagStartE1){
+      FlagStartE1 = false;
+      startE1 = millis();
+    }
+    if(millis() - startE1 > 5000){ // temporisation lecture
+      FlagTqt = false;
+      MajLog("Auto", "Taquet Ferme");// taquet Fermé
+      FlagStartE1 = true;
+    }
+  }
+  if(!FlagStartE1 && (millis() - startE1 > 7000)){ // reset tempo lecture
+    FlagStartE1 = true;
+    // Serial.print("FlagStartE1:"),Serial.println(FlagStartE1);
   }
 
   ArduinoOTA.handle();
@@ -525,13 +547,29 @@ void loop() {
 //---------------------------------------------------------------------------
 void Acquisition() {
 
-  Serial.print("E1:"),Serial.println(FlagIp1);
+  if(config.Ip1){ // si E1 active
+    Serial.print("Taquet: ");
+    if(FlagTqt){
+      Serial.println("Ouvert");
+    } else{
+      Serial.println("Ferme");
+    }
+    Serial.print("lasttaquet: ");
+    if(FlagLastTqt){
+      Serial.println("Ouvert");
+    } else {
+      Serial.println("Ferme");
+    }
+    Serial.print("Demande Feux en attente:"),Serial.println(FlagDemande_Feux);
+  }
   static int8_t nsms;
   static int cpt = 0; // compte le nombre de passage boucle
   static bool firstdecision = false;
   static byte cptallume = 0; // compte le nombre de passage avec Allume
 
   AIntru_HeureActuelle();
+
+  gestionTaquet(); // gestion etat taquet
 
   if (cpt > 6 && nsms == 0 && !firstdecision) {
     /* une seule fois au demarrage attendre au moins 70s et plus de sms en attente */
@@ -547,7 +585,7 @@ void Acquisition() {
   if (gsm) {
     if (!Sim800.getetatSIM())Sim800.reset(SIMPIN); // verification SIM
   }
-  Serial.print(displayTime(0));
+  Serial.println(displayTime(0));
   // Serial.print(F(" Freemem = ")), Serial.println(ESP.getFreeHeap());
   static byte nalaTension = 0;
   static byte nRetourTension = 0;
@@ -557,7 +595,7 @@ void Acquisition() {
   Tension24       = map(adc_mm[3] / nSample, 0, 4095, 0, CoeffTension[3]);
   Lum             = map(adc_mm[4] / nSample, 0 , 4095, 100, 0); // Luminosité 0-100%
 
-  Serial.print("\nluminosité = "), Serial.print(Lum);
+  Serial.print("luminosité = "), Serial.print(Lum);
   Serial.print(" lumlut = "), Serial.println(lumlut(Lum));
 
   // en cas de feux fixe rafraichissement commande en fonction lum
@@ -571,8 +609,8 @@ void Acquisition() {
 
   if (Allume) {
     cptallume ++;
-    Serial.print(F(" Tension 24V :")), Serial.print(float(Tension24 / 100.0)), Serial.print(F(" "));
-    Serial.print("coeff 24V="), Serial.println(CoeffTension[3]);
+    Serial.print(F("Tension 24V :")), Serial.print(float(Tension24 / 100.0));
+    Serial.print(" coeff 24V="), Serial.println(CoeffTension[3]);
     if (cptallume > 2 && Tension24 < 2000) { // on attend 3 passages pour mesurer 24V
       FlagAlarme24V = true;
     }
@@ -629,13 +667,13 @@ void Acquisition() {
       // il faut les traiter
       int numsms = Sim800.getIndexSms(); // cherche l'index des sms en mémoire
       Serial.print(F("Numero Sms en attente = ")), Serial.println(numsms);
-      traite_sms(numsms);// traitement des SMS en attente
       if(numsms > 10){
         // grand nombre sms en memoire, trop long a traiter
         Serial.print("num sms > 10, efface tout :"),Serial.println(numsms);
         MajLog("Auto", "numsms > 10 efface tous sms");// renseigne log
         Sim800.delAllSms();
       }
+      traite_sms(numsms);// traitement des SMS en attente
     }
     else if (nsms == 0 && FlagReset) { // on verifie que tous les SMS sont traités avant Reset
       FlagReset = false;
@@ -668,7 +706,28 @@ void GestionFeux() {
       FastBlink.detach();
       FastRate.detach();
       break;
+    case 6: // Violet 0, Blanc 0 Taquet Ouvert
+      Serial.println("Feux Eteint");
+      ledcWrite(VltPwmChanel, 0);
+      ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinFVlt, LOW);
+      digitalWrite(PinFBlc, LOW);
+      digitalWrite(PinAlimLum, LOW); // extinction Alim LDR
+      SlowBlink.detach();
+      FastBlink.detach();
+      FastRate.detach();
+      break;
     case 1: // Violet 1, Blanc 0
+      Serial.println("Feux Violet");
+      Update_FVlt();
+      ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinFBlc, LOW);
+      digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
+      SlowBlink.detach();
+      FastBlink.detach();
+      FastRate.detach();
+      break;
+    case 5: // Violet 1, Blanc 0 Taquet Fermé
       Serial.println("Feux Violet");
       Update_FVlt();
       ledcWrite(BlcPwmChanel, 0);
@@ -755,15 +814,25 @@ void Update_FBlc() {
 }
 //---------------------------------------------------------------------------
 void Allumage() {
-  Serial.println("Allumage");
-  Allume = true;
-  digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
+  if(!Allume){
+    Serial.println("Allumage");
+    Allume = true;
+    digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
+  }
   GestionFeux();
 }
 //---------------------------------------------------------------------------
 void Extinction() {
   Serial.println("Exctinction");
-  Feux = 0;
+  if(config.Ip1){ // si E1 active
+    if(FlagTqt){  // taquet ouvert
+      Feux = 0;   // D tout eteint et Taquet Ouvert
+    } else {
+      Feux = 6;   // Z tout eteint et Taquet Fermé
+    }
+  } else {
+    Feux = 0;     // D tout eteint pas de Taquet
+  }
   GestionFeux();
   Allume = false;
   digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
@@ -1525,7 +1594,7 @@ fin_i:
             coef = CoeffTension[2];
           }
           if (Sbidon.substring(1, 2) == "4" ) {
-            Allumage(); // Allumage
+            digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
             for (int i = 0; i < 5 ; i++) {
               read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V, PinLum); // lecture des adc
               Alarm.delay(100);
@@ -1554,7 +1623,7 @@ fin_i:
           Recordcalib();														// sauvegarde en SPIFFS
 
           if (M == 4) {
-            Extinction(); // eteindre
+            digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
           }
         }
         else {
@@ -1588,23 +1657,38 @@ fin_i:
           Allumage(); // Violet 1, Blanc 0
           MajLog(nom, "FCV");
         }
-        else if (textesms.indexOf("O") == 0) {
-          Feux = 2;
-          Allumage(); // Violet 0, Blanc 1
-          MajLog(nom, "OCV");
-          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
-        }
-        else if (textesms.indexOf("M") == 0) {
-          Feux = 3;
-          Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
-          MajLog(nom, "MCV");
-          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
-        }
-        else if (textesms.indexOf("S") == 0) {
-          Feux = 4;
-          Allumage(); // Violet 0, Blanc Secteur Cli rapide
-          MajLog(nom, "SCV");
-          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        else if(textesms.indexOf("O") == 0 || textesms.indexOf("M") == 0 || textesms.indexOf("S") == 0){
+          if(FlagTqt){ // taquet ouvert
+            if (textesms.indexOf("O") == 0) {
+              Feux = 2;
+              Allumage(); // Violet 0, Blanc 1
+              MajLog(nom, "OCV");
+              if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+            }
+            else if (textesms.indexOf("M") == 0) {
+              Feux = 3;
+              Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
+              MajLog(nom, "MCV");
+              if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+            }
+            else if (textesms.indexOf("S") == 0) {
+              Feux = 4;
+              Allumage(); // Violet 0, Blanc Secteur Cli rapide
+              MajLog(nom, "SCV");
+              if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+            }
+          } else { // taquet fermé
+            FlagDemande_Feux = true;
+            Memo_Demande_Feux[0] = nom;      // nom demandeur
+            Memo_Demande_Feux[1] = number;   // num demandeur
+            Memo_Demande_Feux[2] = textesms; // demande d'origine
+            Feux = 5; // Violet 1, Blanc 0
+            MajLog(nom, "CCV demande : " + textesms);
+            // Serial.println("memo demande feux :");
+            // Serial.println(Memo_Demande_Feux[0]);
+            // Serial.println(Memo_Demande_Feux[1]);
+            // Serial.println(Memo_Demande_Feux[2]);
+          }
         }
         else {
           // message += "non reconnu" + fl;
@@ -1791,17 +1875,21 @@ fin_i:
           if (textesms.substring(9, 10) == "1") {
             if (!config.Ip1) {
               config.Ip1 = true;
+              FlagTqt = false;
               sauvConfig();
               ActiveInterrupt();
               valid = true;
+              MajLog(nom, textesms);
             }
           }
           else if (textesms.substring(9, 10) == "0") {
             if (config.Ip1) {
               config.Ip1 = false;
+              FlagTqt = true;
               sauvConfig();
               DesActiveInterrupt();
               valid = true;
+              MajLog(nom, textesms);
             }
           }
           if (valid) {
@@ -2149,6 +2237,11 @@ void generationMessage(bool n) {
     case 4: // Violet 0, Blanc Secteur Cli rapide
       message += "S";
       break;
+    case 5: // Taquet fermé + Violet 1
+      message += "C";
+      break;
+    case 6: // Taquet ouvert + Violet 0 + Blanc 0
+      message += "Z";
   }
   message += String(Id.substring(5, 9));
   message += fl;
@@ -2337,9 +2430,14 @@ void SignalVie() {
     Sbidon = F("Jour circule ou demande circulation");
     Serial.println(Sbidon);
     MajLog(F("Auto"), Sbidon);
-    Feux = 1;
+    if(!FlagTqt){// taquet fermé
+      Feux = 5;
+      MajLog("Auto", "CCV");
+    } else {
+      Feux = 1;
+      MajLog("Auto", "FCV");
+    }
     Allumage(); // Violet 1, Blanc 0
-    MajLog("Auto", "FCV");
   }
   envoieGroupeSMS(0, 0);
   action_wakeup_reason(4);
@@ -2682,8 +2780,8 @@ void PrintEEPROM() {
   Serial.print(F("PWM Blanc = "))               , Serial.println(config.FBlcPWM);
   Serial.print(F("PWM Violet = "))              , Serial.println(config.FVltPWM);
   Serial.print(F("Luminosité Auto = "))         , Serial.println(config.LumAuto);
-  Serial.print("Auto F si O/M/S = ")         , Serial.println(config.AutoF);
-  Serial.print("Tempo Auto (s) = ")          , Serial.println(config.TempoAutoF);
+  Serial.print("Auto F si O/S = ")              , Serial.println(config.AutoF);
+  Serial.print("Tempo Auto (s) = ")             , Serial.println(config.TempoAutoF);
   Serial.print(F("Liste Restreinte = "));
   for (int i = 1; i < 10; i++) {
     Serial.print(config.Pos_Pn_PB[i]);
@@ -3293,7 +3391,7 @@ void HomePage() {
   webpage += F("</tr>");
 
   webpage += F("<tr>");
-  webpage += F("<td>Auto F si O/M/S</td>");
+  webpage += F("<td>Auto F si O/S</td>");
   webpage += F("<td>");	webpage += String(config.AutoF);	webpage += F("</td>");
   webpage += F("</tr>");
 
@@ -3842,6 +3940,71 @@ byte sendATcommand(String ATcommand, String answer1, String answer2, unsigned in
     }
   }
   return reply;
+}
+//---------------------------------------------------------------------------
+void gestionTaquet(){
+  if(FlagTqt != FlagLastTqt){ // Taquet a changé d'etat
+    // Serial.println("taquet change");
+    // Serial.println(Memo_Demande_Feux[0]);
+    // Serial.println(Memo_Demande_Feux[1]);
+    // Serial.println(Memo_Demande_Feux[2]);
+
+    if(FlagTqt){ // taquet ouvert
+      if(FlagDemande_Feux){ // demande changement etat feux en cours
+        if(Memo_Demande_Feux[2].indexOf("O") == 0){
+          // Serial.print("position O:"),Serial.println(Memo_Demande_Feux[2].indexOf("O"));
+          Feux = 2;
+          Allumage(); // Violet 0, Blanc 1
+          MajLog(Memo_Demande_Feux[0], "OCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        }
+        else if (Memo_Demande_Feux[2].indexOf("M") == 0) {
+          // Serial.print("position M:"),Serial.println(Memo_Demande_Feux[2].indexOf("M"));
+          Feux = 3;
+          Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
+          MajLog(Memo_Demande_Feux[0], "MCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        }
+        else if (Memo_Demande_Feux[2].indexOf("S") == 0) {
+          // Serial.print("position S:"),Serial.println(Memo_Demande_Feux[2].indexOf("S"));
+          Feux = 4;
+          Allumage(); // Violet 0, Blanc Secteur Cli rapide
+          MajLog(Memo_Demande_Feux[0], "SCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        }
+        generationMessage(0);
+        char number[13];
+        Memo_Demande_Feux[1].toCharArray(number, Memo_Demande_Feux[1].length() + 1);
+        bool smsserveur = false;
+        if (Memo_Demande_Feux[1] == Sim800.getPhoneBookNumber(1)) {
+          smsserveur = true; // si demande provient du serveur index=1
+        }
+        if(Memo_Demande_Feux[0] != "console"){
+          if(!smsserveur){
+            EnvoyerSms(number, true); // reponse demandeur si pas serveur
+          }
+        }
+        envoieGroupeSMS(3, 0); // envoie serveur
+        FlagDemande_Feux = false; // efface demande
+      }
+      else{ // pas de demande, juste ouverture taquet, Feux = violet
+        Feux = 1;
+        Serial.println("Ouverture taquet");
+        MajLog("Auto", "FCV");
+        messageId();
+        generationMessage(0);
+        envoieGroupeSMS(3, 0); // envoie serveur
+      }
+    }
+    else if(!FlagTqt){// Taquet fermé
+      Serial.println("Taquet ferme");
+      Feux = 5; // Feux F + Carré
+      Allumage();
+      MajLog("Auto", "CCV");
+      envoieGroupeSMS(3, 0); // envoie serveur
+    }
+  }
+  FlagLastTqt = FlagTqt;
 }
 /* --------------------  test local serial seulement ----------------------*/
 void recvOneChar() {
