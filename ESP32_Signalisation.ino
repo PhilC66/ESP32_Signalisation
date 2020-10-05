@@ -70,16 +70,17 @@
 
 
 
-  15/09/2020
-  V2-1 pas encore installé
+  V2-10 03/10/2020 installé CV65 05/10/2020
+  bug GPRSDATA message retour
+  V2-1 02/10/2020 installé CV65
   1- upload log sur demande par sms
   2- entrée E1 contact taquet ouvert pour Cv65
      sur reception O,S,M la commande n'est prise en compte que si E1 fermée(taquet Ouvert)
   3- calibration possible par sms idem Autorail
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 1014082 77%, 47928 14% sur PC
-  Arduino IDE 1.8.10 : 1014058 77%, 47928 14% sur raspi
+  Arduino IDE 1.8.10 : 1014118 77%, 47928 14% sur PC
+  Arduino IDE 1.8.10 : 1014094 77%, 47928 14% sur raspi
 
   02/06/2020
   V1-41 installé 13/07/2020 CV45 CV46
@@ -154,8 +155,8 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V2-1";
-int    Magique    = 11;
+String ver        = "V2-10";
+int    Magique    = 12;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -569,7 +570,7 @@ void Acquisition() {
 
   AIntru_HeureActuelle();
 
-  gestionTaquet(); // gestion etat taquet
+  if(config.Ip1) gestionTaquet(); // gestion etat taquet
 
   if (cpt > 6 && nsms == 0 && !firstdecision) {
     /* une seule fois au demarrage attendre au moins 70s et plus de sms en attente */
@@ -2130,7 +2131,7 @@ fin_i:
             JsonObject gprsdata = doc.createNestedObject("GPRSDATA");
             gprsdata["apn"]  = config.apn;
             gprsdata["user"] = config.gprsUser;
-            // gprsdata["pass"] = config.gprsPass;
+            gprsdata["pass"] = config.gprsPass;
             Sbidon = "";
             serializeJson(doc, Sbidon);
             message += Sbidon;
@@ -3991,7 +3992,6 @@ void gestionTaquet(){
         Feux = 1;
         Serial.println("Ouverture taquet");
         MajLog("Auto", "FCV");
-        messageId();
         generationMessage(0);
         envoieGroupeSMS(3, 0); // envoie serveur
       }
