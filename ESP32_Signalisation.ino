@@ -68,7 +68,12 @@
   jour non circule continue sans sleep voir log 26/10
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
+  Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
+  Arduino IDE 1.8.10 : 1014138 77%, 47928 14% sur PC
+  Arduino IDE 1.8.10 : 1014114 77%, 47928 14% sur raspi
 
+  V2-11 27/10/2020 pas installé
+  sur reception sms F si Carré fermé ne rien faire
 
   V2-10 03/10/2020 installé CV65 05/10/2020
   bug GPRSDATA message retour
@@ -77,10 +82,6 @@
   2- entrée E1 contact taquet ouvert pour Cv65
      sur reception O,S,M la commande n'est prise en compte que si E1 fermée(taquet Ouvert)
   3- calibration possible par sms idem Autorail
-
-  Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 1014118 77%, 47928 14% sur PC
-  Arduino IDE 1.8.10 : 1014094 77%, 47928 14% sur raspi
 
   02/06/2020
   V1-41 installé 13/07/2020 CV45 CV46
@@ -147,7 +148,7 @@ unsigned int adc_mm[5];            // stockage pour la moyenne mobile
 
 uint64_t TIME_TO_SLEEP  = 15;/* Time ESP32 will go to sleep (in seconds) */
 unsigned long debut     = 0; // pour decompteur temps wifi
-unsigned long timer100  = 0; // pour timer 100ms adc
+// unsigned long timer100  = 0; // pour timer 100ms adc
 byte calendrier[13][32]; // tableau calendrier ligne 0 et jour 0 non utilisé, 12*31
 char filecalendrier[13]  = "/filecal.csv";  // fichier en SPIFFS contenant le calendrier de circulation
 char filecalibration[11] = "/coeff.txt";    // fichier en SPIFFS contenant les data de calibration
@@ -155,7 +156,7 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V2-10";
+String ver        = "V2-11";
 int    Magique    = 12;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
@@ -474,9 +475,9 @@ void setup() {
     FlagLastTqt = false;
   }
 
-  if (Feux != 0) { // si une valeur Feux different de 0 en memoire RTC, on Allume les feux
-    Allumage();
-  }
+  // if (Feux != 0) { // si une valeur Feux different de 0 en memoire RTC, on Allume les feux
+    // Allumage();
+  // }
   MajLog("Auto","Lancement");
   // SelftestFeux();
 }
@@ -1595,7 +1596,7 @@ fin_i:
             coef = CoeffTension[2];
           }
           if (Sbidon.substring(1, 2) == "4" ) {
-            digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
+            if(!Allume)digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
             for (int i = 0; i < 5 ; i++) {
               read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V, PinLum); // lecture des adc
               Alarm.delay(100);
@@ -1623,7 +1624,7 @@ fin_i:
           FlagCalibration = false;
           Recordcalib();														// sauvegarde en SPIFFS
 
-          if (M == 4) {
+          if (M == 4 && !Allume) {
             digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
           }
         }
@@ -1654,9 +1655,11 @@ fin_i:
           MajLog(nom, "DCV");
         }
         else if (textesms.indexOf("F") == 0) {
-          Feux = 1;
-          Allumage(); // Violet 1, Blanc 0
-          MajLog(nom, "FCV");
+          if(Feux < 5 ){ // si Carré fermé ne rien faire
+            Feux = 1;
+            Allumage(); // Violet 1, Blanc 0
+            MajLog(nom, "FCV");
+          }
         }
         else if(textesms.indexOf("O") == 0 || textesms.indexOf("M") == 0 || textesms.indexOf("S") == 0){
           if(FlagTqt){ // taquet ouvert
