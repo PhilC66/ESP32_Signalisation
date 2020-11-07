@@ -69,10 +69,14 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 1014138 77%, 47928 14% sur PC
-  Arduino IDE 1.8.10 : 1014114 77%, 47928 14% sur raspi
+  Arduino IDE 1.8.10 : 1014254 77%, 47960 14% sur PC
+  Arduino IDE 1.8.10 : 1014230 77%, 47960 14% sur raspi
 
-  V2-11 27/10/2020 pas installé
+  V2-12 12/12/2020 pas installé
+  remplacer <credentials_ftp.h> par <credentials_tpcf.h>
+  correction char ftpUser
+  nouveau magic
+  V2-11 27/10/2020 installé CV65 30/10/2020
   sur reception sms F si Carré fermé ne rien faire
 
   V2-10 03/10/2020 installé CV65 05/10/2020
@@ -81,7 +85,8 @@
   1- upload log sur demande par sms
   2- entrée E1 contact taquet ouvert pour Cv65
      sur reception O,S,M la commande n'est prise en compte que si E1 fermée(taquet Ouvert)
-  3- calibration possible par sms idem Autorail
+  3- calibration possible par sms idem Autorail,
+     permet recalibration a distance en cas de perte données cal, evite un blocage sur alarme Alim
 
   02/06/2020
   V1-41 installé 13/07/2020 CV45 CV46
@@ -113,7 +118,7 @@
 #include <Ticker.h>
 #include "passdata.h"
 #include <ArduinoJson.h>
-#include <credentials_ftp.h>
+#include <credentials_tpcf.h>
 
 String  webpage = "";
 #define ServerVersion "1.0"
@@ -156,8 +161,8 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V2-11";
-int    Magique    = 12;
+String ver        = "V2-12";
+int    Magique    = 13;
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -248,7 +253,7 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   char    gprsUser[11];    // user for APN
   char    gprsPass[11];    // pass for APN
   char    ftpServeur[26];  // serveur ftp
-  char    ftpUser[8];      // user ftp
+  char    ftpUser[9];      // user ftp
   char    ftpPass[16];     // pwd ftp
   int     ftpPort;         // port ftp
 } ;
@@ -382,7 +387,7 @@ void setup() {
     tempapn.toCharArray(config.apn, (tempapn.length() + 1));
     tempGprsUser.toCharArray(config.gprsUser,(tempGprsUser.length() + 1));
     tempGprsPass.toCharArray(config.gprsPass,(tempGprsPass.length() + 1));
-    tempftpServer.toCharArray(config.ftpServeur,(tempftpServer.length() + 1));
+    tempServer.toCharArray(config.ftpServeur,(tempServer.length() + 1));
     tempftpUser.toCharArray(config.ftpUser,(tempftpUser.length() + 1));
     tempftpPass.toCharArray(config.ftpPass,(tempftpPass.length() + 1));
 
