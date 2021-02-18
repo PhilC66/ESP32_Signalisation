@@ -69,8 +69,12 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 1014254 77%, 47960 14% sur PC
+  Arduino IDE 1.8.10 : 1014910 77%, 47992 14% sur PC
   Arduino IDE 1.8.10 : 1014230 77%, 47960 14% sur raspi
+
+  V2-12 15/02/2021 installé CV65 19/02/2021
+  1 - mise en place verification/Alarme defaillance Cde Feu Blanc
+  2 - fiabilisation mesure tension lors du calibrage
 
   V2-12 12/12/2020 pas installé
   remplacer <credentials_ftp.h> par <credentials_tpcf.h>
@@ -101,6 +105,8 @@
   installation Cv65 V1-4
 
 */
+String ver        = "V2-12";
+int    Magique    = 13;
 
 #include <Battpct.h>
 #include <Sim800l.h>              //my SIM800 modifié
@@ -127,15 +133,16 @@ bool    SPIFFS_present = false;
 
 // #define RESET_PIN     18   // declaré par Sim800l.h
 // #define LED_PIN        5   // declaré par Sim800l.h
+#define PinChckFblc   4    // Entrée verification Cde Feu Blanc
 #define PinBattProc   35   // liaison interne carte Lolin32 adc
 #define PinBattSol    39   // Batterie générale 12V adc VN
 #define PinBattUSB    36   // V USB 5V adc VP 36, 25 ADC2 pas utilisable avec Wifi
 #define PinIp1        32   // Entrée Ip1 Wake up EXT1
 #define PinIp2        33   // Entrée Ip2 Wake up EXT1 fonction reserve
 #define Pin24V        26   // Mesure Tension 24V
-#define PinFBlc       21   // Sortie Commande Feux Blanc
+#define PinFBlc       21   // Sortie Commande Feu Blanc
 #define PinConvert    19   // Sortie Commande Convertisseur 12/24V
-#define PinFVlt       15   // Sortie Commande Feux Violet
+#define PinFVlt       15   // Sortie Commande Feu Violet
 #define RX_PIN        16   // TX Sim800
 #define TX_PIN        17   // RX Sim800
 #define PinReset      13   // Reset Hard
@@ -161,8 +168,7 @@ char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le lo
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
-String ver        = "V2-12";
-int    Magique    = 13;
+
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
@@ -192,6 +198,8 @@ RTC_DATA_ATTR bool FirstWakeup             = true;  // envoie premier message vi
 RTC_DATA_ATTR bool flagCircule             = false; // circule demandé -> inverse le calendrier, valid 1 seul jour
 RTC_DATA_ATTR bool FileLogOnce             = false; // true si log > seuil alerte
 
+bool FlagAlarmeCdeFBlc       = false; // Alarme defaut commande Feu Blanc
+bool FlagLastAlarmeCdeFBlc   = false;
 bool FlagAlarme24V           = false; // Alarme tension 24V Allumage
 bool FlagLastAlarme24V       = false;
 bool FlagTqt                 = false; // Position Taquet false = fermé, entree=0
@@ -242,8 +250,8 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   int     SlowBlinker;     // ms
   int     FastBlinker;     // ms
   int     FastRater;       // ms
-  int     FVltPWM;         // Modulation Feux Violet %
-  int     FBlcPWM;         // Modulation Feux Blanc %
+  int     FVltPWM;         // Modulation Feu Violet %
+  int     FBlcPWM;         // Modulation Feu Blanc %
   bool    Pos_Pn_PB[10];   // numero du Phone Book (1-9) à qui envoyer 0/1 0 par defaut
   bool    LumAuto;         // luminosité Auto=true
   bool    AutoF;           // true Retour automatique F si O/M/S apres TempoAutoF
@@ -310,6 +318,7 @@ void setup() {
   pinMode(PinConvert , OUTPUT);
   pinMode(PinAlimLum , OUTPUT);
   pinMode(PinTest    , INPUT_PULLUP);
+  pinMode(PinChckFblc, INPUT_PULLUP);
   digitalWrite(PinConvert , LOW); // Alimentation Convert 0
   digitalWrite(PinAlimLum , HIGH); // Alimentation de la LDR
   adcAttachPin(PinBattProc);
@@ -339,8 +348,8 @@ void setup() {
   ledcSetup(VltPwmChanel, 1000, 8);
   ledcAttachPin(PinFVlt, VltPwmChanel);
 
-  ledcWrite(VltPwmChanel, 0); // Feux Violet 0
-  ledcWrite(BlcPwmChanel, 0); // Feux Blanc 0
+  ledcWrite(VltPwmChanel, 0); // Feu Violet 0
+  ledcWrite(BlcPwmChanel, 0); // Feu Blanc 0
 
   init_adc_mm();// initialisation tableau pour adc Moyenne Mobile
   ADC.attach_ms(100, adc_read); // lecture des adc toute les 100ms
@@ -484,7 +493,6 @@ void setup() {
     // Allumage();
   // }
   MajLog("Auto","Lancement");
-  // SelftestFeux();
 }
 //---------------------------------------------------------------------------
 void loop() {
@@ -492,7 +500,7 @@ void loop() {
 
   if (rebond1 > millis()) rebond1 = millis();
   if (rebond2 > millis()) rebond2 = millis();
-
+//*************** Verification reception SMS ***************
   char* bufPtr = SIM800InBuffer;	//buffer pointer
   if (Serial2.available()) {      	//any data available from the FONA?
     int charCount = 0;
@@ -518,38 +526,27 @@ void loop() {
       traite_sms(slot);
     }
   }
-
-  static unsigned long startE1 = millis();
-  static bool FlagStartE1 = true;
-  // lecture entree Ip1
-  if (config.Ip1 && digitalRead(PinIp1) == 0 && !FlagTqt){
-    if(FlagStartE1){
-      FlagStartE1 = false;
-      startE1 = millis();
-    }
-    if(millis() - startE1 > 5000){ // temporisation lecture
-      FlagTqt = true;
-      MajLog("Auto", "Taquet Ouvert");// taquet Ouvert
-      FlagStartE1 = true;
-    }
-  } else if(config.Ip1 && digitalRead(PinIp1) == 1 && FlagTqt){
-    if(FlagStartE1){
-      FlagStartE1 = false;
-      startE1 = millis();
-    }
-    if(millis() - startE1 > 5000){ // temporisation lecture
-      FlagTqt = false;
-      MajLog("Auto", "Taquet Ferme");// taquet Fermé
-      FlagStartE1 = true;
-    }
-  }
-  if(!FlagStartE1 && (millis() - startE1 > 7000)){ // reset tempo lecture
-    FlagStartE1 = true;
-    // Serial.print("FlagStartE1:"),Serial.println(FlagStartE1);
-  }
+//*************** Verification position taquet ***************
+  VerifTaquet();
+//*************** Verification commande Feu Blanc ***************
+  VerifCdeFBlc();
 
   ArduinoOTA.handle();
   Alarm.delay(0);
+
+  /* calcul temps de boucle */
+  // static unsigned long debutloop = millis();
+  // static unsigned long cumultimeloop = 0;
+  // static int compteurloop = 0;
+  // cumultimeloop += millis() - debutloop;
+  // if(compteurloop ++ > 10000){
+    // Serial.print("temps loop:"),Serial.print((float)cumultimeloop/10000);
+    // Serial.print(", cpt   loop:"),Serial.println(compteurloop);
+    // compteurloop = 0;
+    // cumultimeloop = 0;
+  // }
+  // debutloop = millis();
+
 }	//fin loop
 //---------------------------------------------------------------------------
 void Acquisition() {
@@ -725,7 +722,7 @@ void GestionFeux() {
       FastRate.detach();
       break;
     case 1: // Violet 1, Blanc 0
-      Serial.println("Feux Violet");
+      Serial.println("Feu Violet");
       Update_FVlt();
       ledcWrite(BlcPwmChanel, 0);
       digitalWrite(PinFBlc, LOW);
@@ -735,7 +732,7 @@ void GestionFeux() {
       FastRate.detach();
       break;
     case 5: // Violet 1, Blanc 0 Taquet Fermé
-      Serial.println("Feux Violet");
+      Serial.println("Feu Violet");
       Update_FVlt();
       ledcWrite(BlcPwmChanel, 0);
       digitalWrite(PinFBlc, LOW);
@@ -745,7 +742,7 @@ void GestionFeux() {
       FastRate.detach();
       break;
     case 2: // Violet 0, Blanc 1
-      Serial.println("Feux Blanc");
+      Serial.println("Feu Blanc");
       ledcWrite(VltPwmChanel, 0);
       Update_FBlc();
       digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
@@ -754,7 +751,7 @@ void GestionFeux() {
       FastRate.detach();
       break;
     case 3: // Violet 0, Blanc Cli1
-      Serial.println("Feux Blc Clignotant lent");
+      Serial.println("Feu Blc Clignotant lent");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
       digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
@@ -764,7 +761,7 @@ void GestionFeux() {
       SlowBlink.attach_ms(config.SlowBlinker, blink);
       break;
     case 4: // Violet 0, Blanc Cli2
-      Serial.println("Feux Blc Clignotant rapide");
+      Serial.println("Feu Blc Clignotant rapide");
       ledcWrite(VltPwmChanel, 0);
       ledcWrite(BlcPwmChanel, 0);
       digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
@@ -777,7 +774,16 @@ void GestionFeux() {
       blinker = false;
       FastRate.attach_ms(config.FastRater, toggle);
       break;
-      // default:
+    default:// idem 0 Violet 0, Blanc 0
+      Serial.println("Feux Eteint");
+      ledcWrite(VltPwmChanel, 0);
+      ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinFVlt, LOW);
+      digitalWrite(PinFBlc, LOW);
+      digitalWrite(PinAlimLum, LOW); // extinction Alim LDR
+      SlowBlink.detach();
+      FastBlink.detach();
+      FastRate.detach();
   }
 }
 //---------------------------------------------------------------------------
@@ -857,28 +863,6 @@ void AutoFermeture() {
     MajLog("AutoF", "FCV");
   }
   Alarm.disable(Auto_F);
-}
-//---------------------------------------------------------------------------
-void SelftestFeux() {
-  digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
-  int memFeux = Feux; // memorisation etat Feux
-  for (int i = 1; i < 5; i++) {
-    Feux = i;
-    GestionFeux();
-    if (i == 4) {
-      Alarm.delay(4000);
-    }
-    else {
-      Alarm.delay(3000);
-    }
-  }
-  Feux = 0;
-  GestionFeux();
-  digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
-  Feux = memFeux; // restitution etat Feux
-  if (Allume) {
-    Allumage(); // retour etat precedent
-  }
 }
 //---------------------------------------------------------------------------
 void traite_sms(byte slot) {
@@ -1614,7 +1598,8 @@ fin_i:
           FlagCalibration = true;
 
           coef = CoeffTensionDefaut;
-          tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
+          tension = map(adc_mm[M-1] / nSample, 0, 4095, 0, coef);
+          // tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
           // Serial.print("TensionBatterie = "),Serial.println(TensionBatterie);
           tensionmemo = tension;
         }
@@ -1624,7 +1609,8 @@ fin_i:
           /* calcul nouveau coeff */
           coef = Sbidon.substring(0, 4).toFloat() / float(tensionmemo) * CoeffTensionDefaut;
           // Serial.print("Coeff Tension = "),Serial.println(coef);
-          tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
+          tension = map(adc_mm[M-1] / nSample, 0, 4095, 0, coef);
+          // tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
           CoeffTension[M - 1] = coef;
           FlagCalibration = false;
           Recordcalib();														// sauvegarde en SPIFFS
@@ -1661,6 +1647,7 @@ fin_i:
         }
         else if (textesms.indexOf("F") == 0) {
           if(Feux < 5 ){ // si Carré fermé ne rien faire
+            EffaceAlaCdeFBlc();
             Feux = 1;
             Allumage(); // Violet 1, Blanc 0
             MajLog(nom, "FCV");
@@ -1669,18 +1656,21 @@ fin_i:
         else if(textesms.indexOf("O") == 0 || textesms.indexOf("M") == 0 || textesms.indexOf("S") == 0){
           if(FlagTqt){ // taquet ouvert
             if (textesms.indexOf("O") == 0) {
+              EffaceAlaCdeFBlc();
               Feux = 2;
               Allumage(); // Violet 0, Blanc 1
               MajLog(nom, "OCV");
               if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
             }
             else if (textesms.indexOf("M") == 0) {
+              EffaceAlaCdeFBlc();
               Feux = 3;
               Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
               MajLog(nom, "MCV");
               if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
             }
             else if (textesms.indexOf("S") == 0) {
+              EffaceAlaCdeFBlc();
               Feux = 4;
               Allumage(); // Violet 0, Blanc Secteur Cli rapide
               MajLog(nom, "SCV");
@@ -1742,7 +1732,7 @@ fin_i:
       else if (textesms.indexOf(F("SLOWBLINKER")) == 0) {
         if (textesms.substring(11, 12) == "=") {
           int i = textesms.substring(12, textesms.length()).toInt();
-          if (i > 4 && i < 2001) {
+          if (i > 199 && i < 2001) {
             config.SlowBlinker = i;
             sauvConfig();
           }
@@ -1757,7 +1747,7 @@ fin_i:
       else if (textesms.indexOf(F("FASTBLINKER")) == 0) {
         if (textesms.substring(11, 12) == "=") {
           int i = textesms.substring(12, textesms.length()).toInt();
-          if (i > 4 && i < 2001) {
+          if (i > 149 && i < 2001) {
             config.FastBlinker = i;
             sauvConfig();
           }
@@ -1772,7 +1762,7 @@ fin_i:
       else if (textesms.indexOf(F("FASTRATER")) == 0) {
         if (textesms.substring(9, 10) == "=") {
           int i = textesms.substring(10, textesms.length()).toInt();
-          if (i > 4 && i < 3001) {
+          if (i > 999 && i < 3001) {
             config.FastRater = i;
             sauvConfig();
           }
@@ -1781,12 +1771,6 @@ fin_i:
         message += "FastRater =";
         message += config.FastRater;
         message += "ms";
-        message += fl;
-        EnvoyerSms(number, sms);
-      }
-      else if (textesms.indexOf(F("SELFTEST")) == 0) {
-        SelftestFeux();
-        message += "Lancement Selftest";
         message += fl;
         EnvoyerSms(number, sms);
       }
@@ -2152,6 +2136,12 @@ fin_i:
         }
         EnvoyerSms(number, sms);
       }
+      else if (textesms == "RSTALACDEFBLC") {
+        // demande reset Alarme Cde Feu Blanc
+        EffaceAlaCdeFBlc();
+        message += "Reset Alarme en cours";
+        EnvoyerSms(number, sms);
+      }
       //**************************************
       else {
         message += F("message non reconnu !");
@@ -2181,6 +2171,11 @@ void envoie_alarme() {
     SendEtat = true;
     MajLog(F("Auto"), F("AlarmeTension"));
     FlagLastAlarmeTension = FlagAlarmeTension;
+  }
+  if (FlagAlarmeCdeFBlc != FlagLastAlarmeCdeFBlc) {
+    SendEtat = true;
+    MajLog(F("Auto"), "Alarme Cde FBlc");
+    FlagLastAlarmeCdeFBlc = FlagAlarmeCdeFBlc;
   }
   if (SendEtat) { 						// si envoie Etat demandé
     envoieGroupeSMS(0, 0);		// envoie groupé
@@ -2219,7 +2214,7 @@ void generationMessage(bool n) {
   // n = 0 message normal
   // n = 1 message fin analyse
   messageId();
-  if (FlagAlarmeTension || FlagLastAlarmeTension || FlagAlarme24V) {
+  if (FlagAlarmeTension || FlagLastAlarmeTension || FlagAlarme24V || FlagAlarmeCdeFBlc) {
     message += F("--KO--------KO--");
   }
   else {
@@ -2284,12 +2279,14 @@ void generationMessage(bool n) {
   // message += fl;
   // }
   if ((calendrier[month()][day()] ^ flagCircule)) {
-    message += F("Jour Circule");
+    message += "Jour Circule" + fl;
   }
   else {
-    message += F("Jour Non Circule");
+    message += "Jour Non Circule" + fl;
   }
-  message += fl;
+  if(FlagAlarmeCdeFBlc){
+    message += "Defaut Cde Feu Blanc" + fl;
+  }
 }
 //---------------------------------------------------------------------------
 void EnvoyerSms(char *num, bool sms) {
@@ -3949,6 +3946,77 @@ byte sendATcommand(String ATcommand, String answer1, String answer2, unsigned in
     }
   }
   return reply;
+}
+//---------------------------------------------------------------------------
+void VerifCdeFBlc(){
+  // si F != 2(Ouvert) on mesure entree PinChckFblc si == 0 Alarme
+  // on mesure accumulation sur 2 secondes si ratio < 35%
+  static unsigned long tmesure = millis();
+  if (tmesure > millis()) tmesure = millis();
+  static int compteurmesureres = 0;
+  static int accumesureres = 0;
+  int periodemesures = 2000;
+  if(Feux != 2){
+    if(millis()- tmesure > periodemesures){// periode mesure > periodemesures
+      if(compteurmesureres > 1200){
+        // pour eviter fausses alarmes quand proc occupé par ailleurs
+        Serial.print("Cpt Cde FBLc:"),Serial.print(compteurmesureres);
+        Serial.print(", accu:"),Serial.print(accumesureres);
+        Serial.print(", %:"),Serial.println((float)accumesureres/compteurmesureres);
+        if((float)accumesureres/compteurmesureres < .35 ){// .5 = M, .75 = S
+          Serial.println("Alarme Cde Feu Blanc");
+          FlagAlarmeCdeFBlc = true;
+          if(!FlagLastAlarmeCdeFBlc){ // si premiere fois
+            Extinction();
+          }
+        }
+      }
+      tmesure = millis();
+      compteurmesureres = 0;
+      accumesureres = 0;
+    }
+    accumesureres += digitalRead(PinChckFblc);
+    compteurmesureres ++;
+  }
+}
+//---------------------------------------------------------------------------
+void EffaceAlaCdeFBlc(){
+  // efface l'alarme Cde Feu Blanc, pour rendre de nouveau
+  // operationnel l'extinction en cas de nouveau probleme
+  FlagAlarmeCdeFBlc = false;
+  FlagLastAlarmeCdeFBlc = false;
+}
+//---------------------------------------------------------------------------
+void VerifTaquet(){
+  static unsigned long startE1 = millis();
+  if (startE1 > millis()) startE1 = millis();
+  static bool FlagStartE1 = true;
+  // lecture entree Ip1
+  if (config.Ip1 && digitalRead(PinIp1) == 0 && !FlagTqt){
+    if(FlagStartE1){
+      FlagStartE1 = false;
+      startE1 = millis();
+    }
+    if(millis() - startE1 > 5000){ // temporisation lecture
+      FlagTqt = true;
+      MajLog("Auto", "Taquet Ouvert");// taquet Ouvert
+      FlagStartE1 = true;
+    }
+  } else if(config.Ip1 && digitalRead(PinIp1) == 1 && FlagTqt){
+    if(FlagStartE1){
+      FlagStartE1 = false;
+      startE1 = millis();
+    }
+    if(millis() - startE1 > 5000){ // temporisation lecture
+      FlagTqt = false;
+      MajLog("Auto", "Taquet Ferme");// taquet Fermé
+      FlagStartE1 = true;
+    }
+  }
+  if(!FlagStartE1 && (millis() - startE1 > 7000)){ // reset tempo lecture
+    FlagStartE1 = true;
+    // Serial.print("FlagStartE1:"),Serial.println(FlagStartE1);
+  }
 }
 //---------------------------------------------------------------------------
 void gestionTaquet(){
