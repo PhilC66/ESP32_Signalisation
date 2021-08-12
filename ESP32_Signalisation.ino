@@ -69,10 +69,13 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 1014910 77%, 47992 14% sur PC
-  Arduino IDE 1.8.10 : 1014230 77%, 47960 14% sur raspi
+  Arduino IDE 1.8.10 : 1013398 77%, 47992 14% sur PC
+  Arduino IDE 1.8.10 : 1013374 77%, 47992 14% sur raspi
 
-  V2-12 15/02/2021 installé CV65 19/02/2021
+  V2-13 12/08/2021 
+  1- ajouter dans log, numero appelant non reconnu, lorsque envoie sms soi meme pour majheure
+
+  V2-12 15/02/2021 installé CV65 19/02/2021, CV55-56
   1 - mise en place verification/Alarme defaillance Cde Feu Blanc
   2 - fiabilisation mesure tension lors du calibrage
 
@@ -105,7 +108,7 @@
   installation Cv65 V1-4
 
 */
-String ver        = "V2-12";
+String ver        = "V2-13";
 int    Magique    = 13;
 
 #include <Battpct.h>
@@ -2150,7 +2153,10 @@ fin_i:
       }
     }
     else {
-      Serial.print(F("Appelant non reconnu ! "));
+      Sbidon = F("Appelant non reconnu ! ");
+      Sbidon += String(numero);
+      Serial.println(Sbidon);
+      MajLog("Auto", Sbidon);// renseigne log
     }
     if (sms) { // suppression du SMS
       EffaceSMS(slot);
@@ -2366,6 +2372,7 @@ void MajHeure(String smsdate) {
           char numchar[13];
           String numstring = Sim800.getNumTel();
           numstring.toCharArray(numchar, 13);
+          MajLog("Auto", "envoie sms soi meme pour majheure");// renseigne log
           EnvoyerSms(numchar, true);
           break;
         }
