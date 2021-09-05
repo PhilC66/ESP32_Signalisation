@@ -72,7 +72,10 @@
   Arduino IDE 1.8.10 : 1013398 77%, 47992 14% sur PC
   Arduino IDE 1.8.10 : 1013374 77%, 47992 14% sur raspi
 
-  V2-13 12/08/2021 
+  V2-14 30/08/2021 pas installé
+  1 - suppression rearmenent tempo AutoF sur demande ST
+
+  V2-13 12/08/2021 installé Cv65
   1- ajouter dans log, numero appelant non reconnu, lorsque envoie sms soi meme pour majheure
 
   V2-12 15/02/2021 installé CV65 19/02/2021, CV55-56
@@ -108,7 +111,7 @@
   installation Cv65 V1-4
 
 */
-String ver        = "V2-13";
+String ver        = "V2-14";
 int    Magique    = 13;
 
 #include <Battpct.h>
@@ -1057,7 +1060,7 @@ fin_i:
         if (message.length() > Id.length() + 20) EnvoyerSms(number, sms);; // SMS final
       }
       else if (textesms.indexOf(F("ETAT")) == 0 || textesms.indexOf(F("ST")) == 0) {// "ETAT? de l'installation"
-        if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        // if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         generationMessage(0);
         EnvoyerSms(number, sms);
       }
@@ -1670,7 +1673,7 @@ fin_i:
               Feux = 3;
               Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
               MajLog(nom, "MCV");
-              if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+              // if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
             }
             else if (textesms.indexOf("S") == 0) {
               EffaceAlaCdeFBlc();
