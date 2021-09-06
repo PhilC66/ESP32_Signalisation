@@ -7,6 +7,7 @@
               | Violet | Blanc | Feux | Cde
   OFF         |    0   |   0   |  0   |  D Feux D + Tqt Ouvert (si Tqt)
   Violet Fixe |    1   |   0   |  1   |  F
+  Violet Cli  |  Cliv1 |   0   |  7   |  V Feux Violet Cli Marche à Vue
   Blanc Fixe  |    0   |   1   |  2   |  O
   Blanc Cli 1 |    0   |  Cli1 |  3   |  M
   Blanc Cli 2 |    0   |  Cli2 |  4   |  S
@@ -69,11 +70,12 @@
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 1013398 77%, 47992 14% sur PC
-  Arduino IDE 1.8.10 : 1013374 77%, 47992 14% sur raspi
+  Arduino IDE 1.8.10 : 1015838 77%, 47992 14% sur PC
+  Arduino IDE 1.8.10 : 1015814 77%, 47992 14% sur raspi
 
   V2-14 30/08/2021 pas installé
-  1 - suppression rearmenent tempo AutoF sur demande ST
+  1 - installation VCV
+  2 - suppression rearmenent tempo AutoF sur demande ST
 
   V2-13 12/08/2021 installé Cv65
   1- ajouter dans log, numero appelant non reconnu, lorsque envoie sms soi meme pour majheure
@@ -215,7 +217,7 @@ bool FlagReset = false;       // Reset demandé
 bool jour      = false;				// jour = true, nuit = false
 bool gsm       = true;        // carte GSM presente utilisé pour test sans GSM seulement
 
-String Memo_Demande_Feux[3]="";  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4)
+String Memo_Demande_Feux[3]="";  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4,V7)
 bool FlagDemande_Feux = false;   // si demande encours = true
 
 int CoeffTension[4];          // Coeff calibration Tension
@@ -387,7 +389,7 @@ void setup() {
     config.FBlcPWM       = 75;
     config.FVltPWM       = 75;
     config.LumAuto       = true;
-    config.AutoF         = false;
+    config.AutoF         = true;
     config.TempoAutoF    = 3600;
     for (int i = 0; i < 10; i++) {// initialise liste PhoneBook liste restreinte
       config.Pos_Pn_PB[i] = 0;
@@ -780,6 +782,16 @@ void GestionFeux() {
       blinker = false;
       FastRate.attach_ms(config.FastRater, toggle);
       break;
+    case 7: // V, Violet Cli, Blanc 0
+      Serial.println("Feux Vlt Clignotant lent");
+      ledcWrite(VltPwmChanel, 0);
+      ledcWrite(BlcPwmChanel, 0);
+      digitalWrite(PinAlimLum, HIGH); // allumage Alim LDR
+      digitalWrite(PinFVlt, LOW);
+      FastBlink.detach();
+      FastRate.detach();
+      SlowBlink.attach_ms(config.SlowBlinker, blink);
+      break;
     default:// idem 0 Violet 0, Blanc 0
       Serial.println("Feux Eteint");
       ledcWrite(VltPwmChanel, 0);
@@ -806,10 +818,18 @@ void toggle() {
 //---------------------------------------------------------------------------
 void blink() {
   if (blinker) {
-    ledcWrite(BlcPwmChanel, 0);
+    if(Feux == 3 || Feux == 4){// M ou S
+      ledcWrite(BlcPwmChanel, 0);
+    } else if (Feux == 7){     // V
+      ledcWrite(VltPwmChanel, 0);
+    }
     blinker = false;
   } else {
-    Update_FBlc();
+    if(Feux == 3 || Feux == 4){// M ou S
+      Update_FBlc();
+    } else if (Feux == 7){     // V
+      Update_FVlt();
+    }
     blinker = true;
   }
 }
@@ -861,8 +881,8 @@ void Extinction() {
 //---------------------------------------------------------------------------
 void AutoFermeture() {
   // fin de TempoAutoF
-  // Feux à F si Feux = O/S rien faire si M
-  if (Feux == 2 || Feux == 4) {
+  // Feux à F si Feux = O/S/V rien faire si M
+  if (Feux == 2 || Feux == 4 || Feux == 7) {
     Feux = 1;
     Allumage(); // Violet 1, Blanc 0
     envoieGroupeSMS(3, 0); // envoie serveur
@@ -1652,14 +1672,14 @@ fin_i:
           MajLog(nom, "DCV");
         }
         else if (textesms.indexOf("F") == 0) {
-          if(Feux < 5 ){ // si Carré fermé ne rien faire
+          if(Feux < 5 || Feux == 7){ // si Carré fermé ne rien faire
             EffaceAlaCdeFBlc();
             Feux = 1;
             Allumage(); // Violet 1, Blanc 0
             MajLog(nom, "FCV");
           }
         }
-        else if(textesms.indexOf("O") == 0 || textesms.indexOf("M") == 0 || textesms.indexOf("S") == 0){
+        else if(textesms.indexOf("O") == 0 || textesms.indexOf("M") == 0 || textesms.indexOf("S") == 0 || textesms.indexOf("V") == 0){
           if(FlagTqt){ // taquet ouvert
             if (textesms.indexOf("O") == 0) {
               EffaceAlaCdeFBlc();
@@ -1680,6 +1700,13 @@ fin_i:
               Feux = 4;
               Allumage(); // Violet 0, Blanc Secteur Cli rapide
               MajLog(nom, "SCV");
+              if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+            }
+            else if (textesms.indexOf("V") == 0) {
+              EffaceAlaCdeFBlc();
+              Feux = 7;
+              Allumage(); // Violet Cli, Blanc 0
+              MajLog(nom, "VCV");
               if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
             }
           } else { // taquet fermé
@@ -2255,6 +2282,10 @@ void generationMessage(bool n) {
       break;
     case 6: // Taquet ouvert + Violet 0 + Blanc 0
       message += "Z";
+      break;
+    case 7: // Violet Cli + Blanc 0
+      message += "V";
+      break;
   }
   message += String(Id.substring(5, 9));
   message += fl;
@@ -4057,6 +4088,12 @@ void gestionTaquet(){
           Feux = 4;
           Allumage(); // Violet 0, Blanc Secteur Cli rapide
           MajLog(Memo_Demande_Feux[0], "SCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        }else if (Memo_Demande_Feux[2].indexOf("V") == 0) {
+          // Serial.print("position V:"),Serial.println(Memo_Demande_Feux[2].indexOf("V"));
+          Feux = 7;
+          Allumage(); // Violet Cli, Blanc 0
+          MajLog(Memo_Demande_Feux[0], "VCV");
           if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         }
         generationMessage(0);
