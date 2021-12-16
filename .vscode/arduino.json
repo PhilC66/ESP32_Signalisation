@@ -1,4 +1,5 @@
 {
     "board": "esp32:esp32:d32",
-    "configuration": "PartitionScheme=default,FlashFreq=80,UploadSpeed=921600,DebugLevel=none"
+    "configuration": "PartitionScheme=default,FlashFreq=80,UploadSpeed=921600,DebugLevel=none",
+    "sketch": "ESP32_Signalisation.ino"
 }
