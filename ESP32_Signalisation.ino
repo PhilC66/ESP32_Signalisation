@@ -74,6 +74,7 @@
   Arduino IDE 1.8.10 : 1015814 77%, 47992 14% sur raspi
 
   V2-14 30/08/2021 installé CV35,46,45,56,55,66,65
+
   1 - installation VCV
   2 - suppression rearmenent tempo AutoF sur demande ST
 
