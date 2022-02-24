@@ -69,9 +69,14 @@
   jour non circule continue sans sleep voir log 26/10
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
-  Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (1.0.4 bugg?)
-  Arduino IDE 1.8.10 : 1015838 77%, 47992 14% sur PC
-  Arduino IDE 1.8.10 : 1015814 77%, 47992 14% sur raspi
+  V2-15 11/01/2022 installé Cv65,66,45,46,55,56 tous VH2.2
+  1- Ajout gestion Entre2 Taquet 2, code ajouter F ou O apres code d'origine
+  2- Correction bug si Jour NonCircule ouverture taquet1 affichage incorrect
+    pas de gestion taquet si NonCircule
+
+  Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
+  Arduino IDE 1.8.16 : 1017202 77%, 47928 14% sur PC
+  Arduino IDE 1.8.16 : 1017178 77%, 47928 14% sur raspi
 
   V2-14 30/08/2021 installé CV35,46,45,56,55,66,65
 
@@ -114,7 +119,7 @@
   installation Cv65 V1-4
 
 */
-String ver        = "V2-14";
+String ver        = "V2-15";
 int    Magique    = 13;
 
 #include <Battpct.h>
@@ -146,8 +151,8 @@ bool    SPIFFS_present = false;
 #define PinBattProc   35   // liaison interne carte Lolin32 adc
 #define PinBattSol    39   // Batterie générale 12V adc VN
 #define PinBattUSB    36   // V USB 5V adc VP 36, 25 ADC2 pas utilisable avec Wifi
-#define PinIp1        32   // Entrée Ip1 Wake up EXT1
-#define PinIp2        33   // Entrée Ip2 Wake up EXT1 fonction reserve
+#define PinIp1        32   // Entrée Ip1 Wake up EXT1 Taquet VP Cv65 1=F
+#define PinIp2        33   // Entrée Ip2 Wake up EXT1 Taquet V3 Cv65 1=F
 #define Pin24V        26   // Mesure Tension 24V
 #define PinFBlc       21   // Sortie Commande Feu Blanc
 #define PinConvert    19   // Sortie Commande Convertisseur 12/24V
@@ -211,9 +216,10 @@ bool FlagAlarmeCdeFBlc       = false; // Alarme defaut commande Feu Blanc
 bool FlagLastAlarmeCdeFBlc   = false;
 bool FlagAlarme24V           = false; // Alarme tension 24V Allumage
 bool FlagLastAlarme24V       = false;
-bool FlagTqt                 = false; // Position Taquet false = fermé, entree=0
-bool FlagLastTqt             = false; // memo last etat
-bool FlagIp2                 = false; // Entrée 2 activée
+bool FlagTqt_1               = false; // Position Taquet false = fermé, entree=0
+bool FlagLastTqt_1           = false; // memo last etat
+bool FlagTqt_2               = false; // Position Taquet false = fermé, entree=0
+bool FlagLastTqt_2           = false; // memo last etat
 bool FlagReset = false;       // Reset demandé
 bool jour      = false;				// jour = true, nuit = false
 bool gsm       = true;        // carte GSM presente utilisé pour test sans GSM seulement
@@ -493,9 +499,9 @@ void setup() {
 
   Serial.print(F("flag Circule :")), Serial.println(flagCircule);
 
-  if(!config.Ip1){ // si Ip1 innactive FlagTqt = taquet ouvert
-    FlagTqt = true;
-    FlagLastTqt = false;
+  if(!config.Ip1){ // si Ip1 innactive FlagTqt_1 = taquet ouvert
+    FlagTqt_1 = true;
+    FlagLastTqt_1 = false;
   }
 
   // if (Feux != 0) { // si une valeur Feux different de 0 en memoire RTC, on Allume les feux
@@ -536,7 +542,8 @@ void loop() {
     }
   }
 //*************** Verification position taquet ***************
-  VerifTaquet();
+  VerifTaquet_1(); // si Cv65 Taquet Vp
+  VerifTaquet_2(); // si Cv65 Taquet V3
 //*************** Verification commande Feu Blanc ***************
   VerifCdeFBlc();
 
@@ -561,20 +568,35 @@ void loop() {
 void Acquisition() {
 
   if(config.Ip1){ // si E1 active
-    Serial.print("Taquet: ");
-    if(FlagTqt){
-      Serial.println("Ouvert");
+    Serial.print("Taquet VP: ");
+    if(FlagTqt_1){
+      Serial.print("Ouvert");
     } else{
-      Serial.println("Ferme");
+      Serial.print("Ferme");
     }
-    Serial.print("lasttaquet: ");
-    if(FlagLastTqt){
+    Serial.print(", lasttaquet VP: ");
+    if(FlagLastTqt_1){
+      Serial.print("Ouvert");
+    } else {
+      Serial.print("Ferme");
+    }
+    Serial.print(", Demande Feux en attente:"),Serial.println(FlagDemande_Feux);
+  }
+  if(config.Ip2){ // si E2 active
+    Serial.print("Taquet V3: ");
+    if(FlagTqt_2){
+      Serial.print("Ouvert");
+    } else{
+      Serial.print("Ferme");
+    }
+    Serial.print(", lasttaquet V3: ");
+    if(FlagLastTqt_2){
       Serial.println("Ouvert");
     } else {
       Serial.println("Ferme");
     }
-    Serial.print("Demande Feux en attente:"),Serial.println(FlagDemande_Feux);
   }
+
   static int8_t nsms;
   static int cpt = 0; // compte le nombre de passage boucle
   static bool firstdecision = false;
@@ -582,14 +604,13 @@ void Acquisition() {
 
   AIntru_HeureActuelle();
 
-  if(config.Ip1) gestionTaquet(); // gestion etat taquet
-
   if (cpt > 6 && nsms == 0 && !firstdecision) {
     /* une seule fois au demarrage attendre au moins 70s et plus de sms en attente */
     action_wakeup_reason(get_wakeup_reason());
     firstdecision = true;
   }
   cpt ++;
+  if((config.Ip1 || config.Ip2) && firstdecision) gestionTaquet(); // gestion etat taquet seulement apres demarrage
 
   if (CoeffTension[0] == 0 || CoeffTension[1] == 0 || CoeffTension[2] == 0 || CoeffTension[3] == 0) {
     OuvrirFichierCalibration(); // patch relecture des coeff perdu
@@ -865,7 +886,7 @@ void Allumage() {
 void Extinction() {
   Serial.println("Exctinction");
   if(config.Ip1){ // si E1 active
-    if(FlagTqt){  // taquet ouvert
+    if(FlagTqt_1){  // taquet ouvert
       Feux = 0;   // D tout eteint et Taquet Ouvert
     } else {
       Feux = 6;   // Z tout eteint et Taquet Fermé
@@ -1681,7 +1702,7 @@ fin_i:
           }
         }
         else if(textesms.indexOf("O") == 0 || textesms.indexOf("M") == 0 || textesms.indexOf("S") == 0 || textesms.indexOf("V") == 0){
-          if(FlagTqt){ // taquet ouvert
+          if(FlagTqt_1){ // taquet ouvert
             if (textesms.indexOf("O") == 0) {
               EffaceAlaCdeFBlc();
               Feux = 2;
@@ -1902,7 +1923,7 @@ fin_i:
           if (textesms.substring(9, 10) == "1") {
             if (!config.Ip1) {
               config.Ip1 = true;
-              FlagTqt = false;
+              FlagTqt_1 = false;
               sauvConfig();
               ActiveInterrupt();
               valid = true;
@@ -1912,7 +1933,7 @@ fin_i:
           else if (textesms.substring(9, 10) == "0") {
             if (config.Ip1) {
               config.Ip1 = false;
-              FlagTqt = true;
+              FlagTqt_1 = true;
               sauvConfig();
               DesActiveInterrupt();
               valid = true;
@@ -1938,18 +1959,18 @@ fin_i:
         if (textesms.substring(8, 9) == "=") {
           if (textesms.substring(9, 10) == "1") {
             if (!config.Ip2) {
-              // config.Ip2 = true;
-              // sauvConfig();
-              // ActiveInterrupt();
-              // valid = true;
+              config.Ip2 = true;
+              sauvConfig();
+              ActiveInterrupt();
+              valid = true;
             }
           }
           else if (textesms.substring(9, 10) == "0") {
             if (config.Ip2) {
-              // config.Ip2 = false;
-              // sauvConfig();
-              // DesActiveInterrupt();
-              // valid = true;
+              config.Ip2 = false;
+              sauvConfig();
+              DesActiveInterrupt();
+              valid = true;
             }
           }
           if (valid) {
@@ -1957,13 +1978,12 @@ fin_i:
           }
         }
         message += "Entree 2 ";
-        message += "Sans Action";
-        // if (config.Ip2) {
-        // message += "Active";
-        // }
-        // else {
-        // message += "InActive";
-        // }
+        if (config.Ip2) {
+        message += "Active";
+        }
+        else {
+        message += "InActive";
+        }
         message += fl;
         EnvoyerSms(number, sms);
       }
@@ -2288,7 +2308,14 @@ void generationMessage(bool n) {
       message += "V";
       break;
   }
-  message += String(Id.substring(5, 9));
+  if(config.Ip2){
+    if(FlagTqt_2){ // Taquet ouvert
+      message += "O";
+    } else {
+      message += "F";
+    }
+  }
+  message += String(Id.substring(5, 9));// CVXX
   message += fl;
   message += F("Batterie : ");
   if (!FlagAlarmeTension) {
@@ -2478,7 +2505,7 @@ void SignalVie() {
     Sbidon = F("Jour circule ou demande circulation");
     Serial.println(Sbidon);
     MajLog(F("Auto"), Sbidon);
-    if(!FlagTqt){// taquet fermé
+    if(!FlagTqt_1){// taquet fermé
       Feux = 5;
       MajLog("Auto", "CCV");
     } else {
@@ -4029,28 +4056,28 @@ void EffaceAlaCdeFBlc(){
   FlagLastAlarmeCdeFBlc = false;
 }
 //---------------------------------------------------------------------------
-void VerifTaquet(){
+void VerifTaquet_1(){
   static unsigned long startE1 = millis();
   if (startE1 > millis()) startE1 = millis();
   static bool FlagStartE1 = true;
   // lecture entree Ip1
-  if (config.Ip1 && digitalRead(PinIp1) == 0 && !FlagTqt){
+  if (config.Ip1 && digitalRead(PinIp1) == 0 && !FlagTqt_1){
     if(FlagStartE1){
       FlagStartE1 = false;
       startE1 = millis();
     }
     if(millis() - startE1 > 5000){ // temporisation lecture
-      FlagTqt = true;
+      FlagTqt_1 = true;
       MajLog("Auto", "Taquet Ouvert");// taquet Ouvert
       FlagStartE1 = true;
     }
-  } else if(config.Ip1 && digitalRead(PinIp1) == 1 && FlagTqt){
+  } else if(config.Ip1 && digitalRead(PinIp1) == 1 && FlagTqt_1){
     if(FlagStartE1){
       FlagStartE1 = false;
       startE1 = millis();
     }
     if(millis() - startE1 > 5000){ // temporisation lecture
-      FlagTqt = false;
+      FlagTqt_1 = false;
       MajLog("Auto", "Taquet Ferme");// taquet Fermé
       FlagStartE1 = true;
     }
@@ -4061,14 +4088,41 @@ void VerifTaquet(){
   }
 }
 //---------------------------------------------------------------------------
+void VerifTaquet_2(){
+  static unsigned long startE2 = millis();
+  if (startE2 > millis()) startE2 = millis();
+  static bool FlagstartE2 = true;
+  // lecture entree Ip1
+  if (config.Ip2 && digitalRead(PinIp2) == 0 && !FlagTqt_2){
+    if(FlagstartE2){
+      FlagstartE2 = false;
+      startE2 = millis();
+    }
+    if(millis() - startE2 > 5000){ // temporisation lecture
+      FlagTqt_2 = true;
+      MajLog("Auto", "Veriftaquet Taquet V3 Ouvert");// taquet Ouvert
+      FlagstartE2 = true;
+    }
+  } else if(config.Ip2 && digitalRead(PinIp2) == 1 && FlagTqt_2){
+    if(FlagstartE2){
+      FlagstartE2 = false;
+      startE2 = millis();
+    }
+    if(millis() - startE2 > 5000){ // temporisation lecture
+      FlagTqt_2 = false;
+      MajLog("Auto", "Veriftaquet Taquet V3 Ferme");// taquet Fermé
+      FlagstartE2 = true;
+    }
+  }
+  if(!FlagstartE2 && (millis() - startE2 > 7000)){ // reset tempo lecture
+    FlagstartE2 = true;
+    // Serial.print("FlagstartE2:"),Serial.println(FlagstartE2);
+  }
+}
+//---------------------------------------------------------------------------
 void gestionTaquet(){
-  if(FlagTqt != FlagLastTqt){ // Taquet a changé d'etat
-    // Serial.println("taquet change");
-    // Serial.println(Memo_Demande_Feux[0]);
-    // Serial.println(Memo_Demande_Feux[1]);
-    // Serial.println(Memo_Demande_Feux[2]);
-
-    if(FlagTqt){ // taquet ouvert
+  if(FlagTqt_1 != FlagLastTqt_1){ // Taquet a changé d'etat
+    if(FlagTqt_1){ // taquet ouvert
       if(FlagDemande_Feux){ // demande changement etat feux en cours
         if(Memo_Demande_Feux[2].indexOf("O") == 0){
           // Serial.print("position O:"),Serial.println(Memo_Demande_Feux[2].indexOf("O"));
@@ -4119,8 +4173,7 @@ void gestionTaquet(){
         generationMessage(0);
         envoieGroupeSMS(3, 0); // envoie serveur
       }
-    }
-    else if(!FlagTqt){// Taquet fermé
+    } else { // Taquet fermé
       Serial.println("Taquet ferme");
       Feux = 5; // Feux F + Carré
       Allumage();
@@ -4128,7 +4181,17 @@ void gestionTaquet(){
       envoieGroupeSMS(3, 0); // envoie serveur
     }
   }
-  FlagLastTqt = FlagTqt;
+  FlagLastTqt_1 = FlagTqt_1;
+
+  if(FlagTqt_2 != FlagLastTqt_2){ // Taquet v3 a changé d'etat
+    if(FlagTqt_2){ // Taquet ouvert
+      MajLog("Auto", "gestiontaquet Taquet V3 ouvert");
+    } else {
+      MajLog("Auto", "gestiontaquet Taquet V3 ferme");
+    }
+    envoieGroupeSMS(3, 0); // envoie serveur
+    FlagLastTqt_2 = FlagTqt_2;
+  }
 }
 /* --------------------  test local serial seulement ----------------------*/
 void recvOneChar() {
