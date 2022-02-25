@@ -123,7 +123,7 @@ String ver        = "V2-15";
 int    Magique    = 13;
 
 #include <Battpct.h>
-#include <Sim800l.h>              //my SIM800 modifié
+// #include <Sim800l.h>              //my SIM800 modifié
 #include <Time.h>
 #include <TimeAlarms.h>
 #include <sys/time.h>             //<sys/time.h>
