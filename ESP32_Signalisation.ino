@@ -69,61 +69,25 @@
   jour non circule continue sans sleep voir log 26/10
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
-  V2-15 11/01/2022 installé Cv65,66,45,46,55,56 tous VH2.2
-  1- Ajout gestion Entre2 Taquet 2, code ajouter F ou O apres code d'origine
-  2- Correction bug si Jour NonCircule ouverture taquet1 affichage incorrect
-    pas de gestion taquet si NonCircule
+  V3-00 remplacement biblio GSM
+
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
   Arduino IDE 1.8.16 : 1017202 77%, 47928 14% sur PC
   Arduino IDE 1.8.16 : 1017178 77%, 47928 14% sur raspi
 
-  V2-14 30/08/2021 installé CV35,46,45,56,55,66,65
 
-  1 - installation VCV
-  2 - suppression rearmenent tempo AutoF sur demande ST
-
-  V2-13 12/08/2021 installé Cv65
-  1- ajouter dans log, numero appelant non reconnu, lorsque envoie sms soi meme pour majheure
-
-  V2-12 15/02/2021 installé CV65 19/02/2021, CV55-56
-  1 - mise en place verification/Alarme defaillance Cde Feu Blanc
-  2 - fiabilisation mesure tension lors du calibrage
-
-  V2-12 12/12/2020 pas installé
-  remplacer <credentials_ftp.h> par <credentials_tpcf.h>
-  correction char ftpUser
-  nouveau magic
-  V2-11 27/10/2020 installé CV65 30/10/2020
-  sur reception sms F si Carré fermé ne rien faire
-
-  V2-10 03/10/2020 installé CV65 05/10/2020
-  bug GPRSDATA message retour
-  V2-1 02/10/2020 installé CV65
-  1- upload log sur demande par sms
-  2- entrée E1 contact taquet ouvert pour Cv65
-     sur reception O,S,M la commande n'est prise en compte que si E1 fermée(taquet Ouvert)
-  3- calibration possible par sms idem Autorail,
-     permet recalibration a distance en cas de perte données cal, evite un blocage sur alarme Alim
-
-  02/06/2020
-  V1-41 installé 13/07/2020 CV45 CV46
-  1- maj valeur defaut anticip=2700
-     nouveau magic
-  2- corection bug général, pour changer un Alarm.timerRepeat et Alarm.alarmRepeat,
-     il faut utiliser la fonction Alarm.write(Id, durée)
-     inversion message debut jour
-  3- AutoF applicable seulement O et S pas sur M
-  
-  06/01/2020
-  installation Cv65 V1-4
 
 */
-String ver        = "V2-15";
-int    Magique    = 13;
+
+#include <Arduino.h>
+
+String ver        = "V3-00";
+int    Magique    = 21;
 
 #include <Battpct.h>
-// #include <Sim800l.h>              //my SIM800 modifié
+#include <TinyGsmClient.h>         // modifié
+#include <PubSubClient.h>          // modifié define MQTT_MAX_PACKET_SIZE 164
 #include <Time.h>
 #include <TimeAlarms.h>
 #include <sys/time.h>             //<sys/time.h>
@@ -145,8 +109,16 @@ String  webpage = "";
 bool    SPIFFS_present = false;
 #include "CSS.h"               // pageweb
 
-// #define RESET_PIN     18   // declaré par Sim800l.h
-// #define LED_PIN        5   // declaré par Sim800l.h
+#define TINY_GSM_RX_BUFFER 1030   //update
+#define TINY_GSM_MODEM_SIM808
+#define Serial Serial
+#define SerialAT Serial1
+#define TINY_GSM_DEBUG Serial
+#define TINY_GSM_YIELD() { delay(2); }
+#define TINY_GSM_USE_GPRS true
+#define GSM_PIN "1234"
+
+#define RESET_PIN     18   // Reset Sim800
 #define PinChckFblc   4    // Entrée verification Cde Feu Blanc
 #define PinBattProc   35   // liaison interne carte Lolin32 adc
 #define PinBattSol    39   // Batterie générale 12V adc VN
@@ -163,8 +135,9 @@ bool    SPIFFS_present = false;
 #define PinLum        34   // Mesure Luminosité
 #define PinAlimLum    25   // Alimentation LDR
 #define PinTest       27   // Test sans GSM cc a la masse
+#define LED_PIN        5
 
-#define SIMPIN        1234 // Code PIN carte SIM
+// #define SIMPIN        1234 // Code PIN carte SIM
 
 #define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
 
@@ -175,7 +148,7 @@ unsigned int adc_mm[5];            // stockage pour la moyenne mobile
 uint64_t TIME_TO_SLEEP  = 15;/* Time ESP32 will go to sleep (in seconds) */
 unsigned long debut     = 0; // pour decompteur temps wifi
 // unsigned long timer100  = 0; // pour timer 100ms adc
-byte calendrier[13][32]; // tableau calendrier ligne 0 et jour 0 non utilisé, 12*31
+uint8_t calendrier[13][32]; // tableau calendrier ligne 0 et jour 0 non utilisé, 12*31
 char filecalendrier[13]  = "/filecal.csv";  // fichier en SPIFFS contenant le calendrier de circulation
 char filecalibration[11] = "/coeff.txt";    // fichier en SPIFFS contenant les data de calibration
 char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le log
@@ -195,12 +168,12 @@ volatile int IRQ_Cpt_Ip1  = 0;      //  IRQ Ip1
 volatile int IRQ_Cpt_Ip2  = 0;      //  IRQ Ip2
 volatile unsigned long rebond1 = 0; //	antirebond IRQ
 volatile unsigned long rebond2 = 0; //	antirebond IRQ
-byte DbounceTime = 20;              // antirebond
-byte confign = 0;                   // position enregistrement config EEPROM
-byte recordn = 200;                 // position enregistrement log EEPROM
+uint8_t DbounceTime = 20;              // antirebond
+uint8_t confign = 0;                   // position enregistrement config EEPROM
+uint8_t recordn = 300;                 // position enregistrement log EEPROM
 bool Allume  = false;
-byte BlcPwmChanel = 0;
-byte VltPwmChanel = 1;
+uint8_t BlcPwmChanel = 0;
+uint8_t VltPwmChanel = 1;
 bool isBlinking = false;
 bool blinker = false;
 
@@ -241,6 +214,10 @@ long   Tension24        = 0; // Tension 24V Allumage
 int    Lum              = 0; // Luminosité 0-100%
 int    TableLum[11][2];      // Table PWM en fonction Luminosité
 
+TinyGsm modem(SerialAT);
+TinyGsmClient client(modem);
+
+PubSubClient mqttClient(client);
 WebServer server(80);
 File UploadFile;
 
@@ -267,10 +244,10 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   int     FastRater;       // ms
   int     FVltPWM;         // Modulation Feu Violet %
   int     FBlcPWM;         // Modulation Feu Blanc %
-  bool    Pos_Pn_PB[10];   // numero du Phone Book (1-9) à qui envoyer 0/1 0 par defaut
   bool    LumAuto;         // luminosité Auto=true
   bool    AutoF;           // true Retour automatique F si O/M/S apres TempoAutoF
   int     TempoAutoF;      // temps AutoF (s)
+  bool    Pos_Pn_PB[10];   // numero du Phone Book (1-9) à qui envoyer 0/1 0 par defaut
   char    Idchar[11];      // Id
   char    apn[11];         // APN
   char    gprsUser[11];    // user for APN
@@ -279,6 +256,13 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   char    ftpUser[9];      // user ftp
   char    ftpPass[16];     // pwd ftp
   int     ftpPort;         // port ftp
+  char    mqttServer[26];  // Serveur MQTT
+  char    mqttUserName[11]; // MQTT User
+  char    mqttPass[16];    // MQTT pass
+  char    writeTopic[16];  // channel Id
+  char    readTopic[16];   // channel Id
+  char    permanentTopic[16];  // channel Id
+  int     mqttPort;        // Port serveur MQTT
 } ;
 config_t config;
 
@@ -294,8 +278,8 @@ AlarmId Auto_F;            // Tempo AutoF
 
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
-HardwareSerial *SIM800Serial = &Serial2; // liaison serie FONA SIM800
-Sim800l Sim800;                          // to declare the library
+// HardwareSerial *SIM800Serial = &Serial2; // liaison serie FONA SIM800
+// Sim800l Sim800;                          // to declare the library
 
 //---------------------------------------------------------------------------
 void IRAM_ATTR handleInterruptIp1() { // Entrée 1
@@ -320,11 +304,16 @@ void IRAM_ATTR handleInterruptIp2() { // Entrée 2
 //---------------------------------------------------------------------------
 
 void setup() {
-
+// pour test
+tempServer   = "philippeco.hopto.org";//exploitation.tpcf.fr
+// pour test
   message.reserve(140);
 
   Serial.begin(115200);
   Serial.println();
+  Serial.println(__FILE__);
+  SerialAT.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN, false);
+  Alarm.delay(100);//1000
 
   pinMode(PinIp1     , INPUT_PULLUP);
   pinMode(PinIp2     , INPUT_PULLUP);
@@ -353,8 +342,12 @@ void setup() {
 
   if (gsm) {
     Serial.println("lancement SIM800");
-    SIM800Serial->begin(9600); // 4800
-    Sim800.begin();
+    modem.init(GSM_PIN);
+    Serial.println("Initializing modem...");
+    String modemInfo = modem.getModemInfo();
+
+    Serial.print("Modem Info: ");
+    Serial.println(modemInfo);
   }
   // parametrage PWM pour les feux
   // https://randomnerdtutorials.com/esp32-pwm-arduino-ide/
@@ -399,25 +392,37 @@ void setup() {
     config.AutoF         = true;
     config.TempoAutoF    = 3600;
     for (int i = 0; i < 10; i++) {// initialise liste PhoneBook liste restreinte
-      config.Pos_Pn_PB[i] = 0;
+      config.Pos_Pn_PB[i] = false;
     }
-    // config.Pos_Pn_PB[1]  = 1;	// le premier numero du PB par defaut
-    String temp          = "TPCF_CV65";
-    temp.toCharArray(config.Idchar, 11);
-    String tempapn       = "free";//"sl2sfr"
-    String tempGprsUser  = "";
-    String tempGprsPass  = "";
-    config.ftpPort       = tempftpPort;
-    tempapn.toCharArray(config.apn, (tempapn.length() + 1));
-    tempGprsUser.toCharArray(config.gprsUser,(tempGprsUser.length() + 1));
-    tempGprsPass.toCharArray(config.gprsPass,(tempGprsPass.length() + 1));
+    Sbidon = "TPCF_CV65";
+    Sbidon.toCharArray(config.Idchar,(Sbidon.length() + 1));
+    // strcpy(config.Idchar,"TPCF_CV65");
+    Sbidon = "sl2sfr";
+    Sbidon.toCharArray(config.apn,(Sbidon.length() + 1));
+    // strcpy(config.apn,"sl2sfr"); // "free"
+    Sbidon = "";
+    Sbidon.toCharArray(config.gprsUser,(Sbidon.length() + 1));
+    Sbidon.toCharArray(config.gprsPass,(Sbidon.length() + 1));
+    // strcpy(config.gprsUser,"");
+    // strcpy(config.gprsPass,"");    
     tempServer.toCharArray(config.ftpServeur,(tempServer.length() + 1));
     tempftpUser.toCharArray(config.ftpUser,(tempftpUser.length() + 1));
-    tempftpPass.toCharArray(config.ftpPass,(tempftpPass.length() + 1));
-
+    tempftpPass.toCharArray(config.ftpPass,(tempftpPass.length() + 1));    
+    config.ftpPort       = tempftpPort;
+    tempServer.toCharArray(config.mqttServer, (tempServer.length() + 1));
+    tempmqttUserName.toCharArray(config.mqttUserName, (tempmqttUserName.length() + 1));
+    tempmqttPass.toCharArray(config.mqttPass, (tempmqttPass.length() + 1));
+    strcpy(config.writeTopic,"CV/input");
+    strcpy(config.readTopic,"CV/output");
+    strcpy(config.permanentTopic,"CV/permanent");
+    config.mqttPort = tempmqttPort;
+PrintEEPROM();
     EEPROM.put(confign, config);
     EEPROM.commit();
+    Alarm.delay(500);
+    Serial.print("long config : "),Serial.println(sizeof(config));
     // valeur par defaut des record (log)
+    String temp = "";
     for (int i = 0; i < 5 ; i++) {
       temp = "";
       temp.toCharArray(record[i].dt, 10);
@@ -426,6 +431,7 @@ void setup() {
     }
     EEPROM.put(recordn, record);// ecriture des valeurs par defaut
     EEPROM.commit();
+    Alarm.delay(500);
   }
   EEPROM.end();
   PrintEEPROM();
@@ -478,8 +484,29 @@ void setup() {
   OuvrirFichierCalibration(); // ouvre fichier calibration en SPIFFS
   OuvrirLumLUT();             // ouvre le fichier lumLUT
   // Serial.print(F("temps =")),Serial.println(millis());
+  // if (gsm) {
+    // Sim800.reset(SIMPIN);					// lancer SIM800
+    // MajHeure("");
+  // }
+  
   if (gsm) {
-    Sim800.reset(SIMPIN);					// lancer SIM800
+    Serial.print("Waiting for network...");
+    if (!modem.waitForNetwork()) {
+      Serial.println(" fail");
+      Alarm.delay(10000);
+      // return;
+    }
+    Serial.println(" success");
+
+    if (modem.isNetworkConnected()) {
+      Serial.println("Network connected");
+    }
+    ConnectGPRS();
+    
+    bool res = modem.isGprsConnected();
+    IPAddress local = modem.localIP();
+    Serial.println("Local IP:" + local.toString());
+    modem.setGsmBusy(true);// reject incoming call
     MajHeure("");
   }
 
@@ -515,32 +542,43 @@ void loop() {
 
   if (rebond1 > millis()) rebond1 = millis();
   if (rebond2 > millis()) rebond2 = millis();
+  static unsigned int t0 = millis();
+  bool first = true;
+  if (!mqttClient.connected() && ((millis()- t0) > 5000 || first)){
+      mqttConnect(); // Connect if MQTT client is not connected.
+      // if (mqttSubscribe( readChannelID, 1, readAPIKey, 0 ) == 1 ) {
+      // Serial.println( " Subscribed " );
+      // }
+      t0 = millis();
+      first = false;
+    }
+    mqttClient.loop(); // Call the loop to maintain connection to the server.
 //*************** Verification reception SMS ***************
-  char* bufPtr = SIM800InBuffer;	//buffer pointer
-  if (Serial2.available()) {      	//any data available from the FONA?
-    int charCount = 0;
-    /* Read the notification into SIM800InBuffer */
-    do  {
-      *bufPtr = Serial2.read();
-      bufferrcpt += *bufPtr;
-      Serial.write(*bufPtr);
-      delay(1);// Alarm.delay(1);
-    } while ((*bufPtr++ != '\n') && (Serial2.available()) && (++charCount < (sizeof(SIM800InBuffer) - 1)));
-    /* Add a terminal NULL to the notification string */
-    *bufPtr = 0;
-    if (charCount > 1) {
-      // Serial.print(F("Buffer ="));
-      Serial.println(bufferrcpt);
-    }
-    if ((bufferrcpt.indexOf(F("RING"))) > -1) {	// RING, Ca sonne
-      Sim800.hangoffCall();									// on raccroche
-    }
-    /* Scan the notification string for an SMS received notification.
-      If it's an SMS message, we'll get the slot number in 'slot' */
-    if (1 == sscanf(SIM800InBuffer, "+CMTI: \"SM\",%d", &slot)) {
-      traite_sms(slot);
-    }
-  }
+  // char* bufPtr = SIM800InBuffer;	//buffer pointer
+  // if (Serial2.available()) {      	//any data available from the FONA?
+  //   int charCount = 0;
+  //   /* Read the notification into SIM800InBuffer */
+  //   do  {
+  //     *bufPtr = Serial2.read();
+  //     bufferrcpt += *bufPtr;
+  //     Serial.write(*bufPtr);
+  //     delay(1);// Alarm.delay(1);
+  //   } while ((*bufPtr++ != '\n') && (Serial2.available()) && (++charCount < (sizeof(SIM800InBuffer) - 1)));
+  //   /* Add a terminal NULL to the notification string */
+  //   *bufPtr = 0;
+  //   if (charCount > 1) {
+  //     // Serial.print(F("Buffer ="));
+  //     Serial.println(bufferrcpt);
+  //   }
+  //   if ((bufferrcpt.indexOf(F("RING"))) > -1) {	// RING, Ca sonne
+  //     Sim800.hangoffCall();									// on raccroche
+  //   }
+  //   /* Scan the notification string for an SMS received notification.
+  //     If it's an SMS message, we'll get the slot number in 'slot' */
+  //   if (1 == sscanf(SIM800InBuffer, "+CMTI: \"SM\",%d", &slot)) {
+  //     traite_sms(slot);
+  //   }
+  // }
 //*************** Verification position taquet ***************
   VerifTaquet_1(); // si Cv65 Taquet Vp
   VerifTaquet_2(); // si Cv65 Taquet V3
@@ -600,7 +638,7 @@ void Acquisition() {
   static int8_t nsms;
   static int cpt = 0; // compte le nombre de passage boucle
   static bool firstdecision = false;
-  static byte cptallume = 0; // compte le nombre de passage avec Allume
+  static uint8_t cptallume = 0; // compte le nombre de passage avec Allume
 
   AIntru_HeureActuelle();
 
@@ -616,13 +654,13 @@ void Acquisition() {
     OuvrirFichierCalibration(); // patch relecture des coeff perdu
   }
 
-  if (gsm) {
-    if (!Sim800.getetatSIM())Sim800.reset(SIMPIN); // verification SIM
-  }
+  // if (gsm) {
+  //   if (!Sim800.getetatSIM())Sim800.reset(SIMPIN); // verification SIM
+  // }
   Serial.println(displayTime(0));
   // Serial.print(F(" Freemem = ")), Serial.println(ESP.getFreeHeap());
-  static byte nalaTension = 0;
-  static byte nRetourTension = 0;
+  static uint8_t nalaTension = 0;
+  static uint8_t nRetourTension = 0;
   TensionBatterie = map(adc_mm[0] / nSample, 0, 4095, 0, CoeffTension[0]);
   VBatterieProc   = map(adc_mm[1] / nSample, 0, 4095, 0, CoeffTension[1]);
   VUSB            = map(adc_mm[2] / nSample, 0, 4095, 0, CoeffTension[2]);
@@ -694,22 +732,40 @@ void Acquisition() {
     /* verification nombre SMS en attente(raté en lecture directe)
        traitement des sms en memoire un par un,
        pas de traitement en serie par commande 51, traitement beaucoup trop long */
-    nsms = Sim800.getNumSms(); // nombre de SMS en attente (1s)
-    Serial.print(F("Sms en attente = ")), Serial.println(nsms);
+    // nsms = Sim800.getNumSms(); // nombre de SMS en attente (1s)
+    // Serial.print(F("Sms en attente = ")), Serial.println(nsms);
 
-    if (nsms > 0) {	// nombre de SMS en attente
-      // il faut les traiter
-      int numsms = Sim800.getIndexSms(); // cherche l'index des sms en mémoire
-      Serial.print(F("Numero Sms en attente = ")), Serial.println(numsms);
-      if(numsms > 10){
+    // if (nsms > 0) {	// nombre de SMS en attente
+    //   // il faut les traiter
+    //   int numsms = Sim800.getIndexSms(); // cherche l'index des sms en mémoire
+    //   Serial.print(F("Numero Sms en attente = ")), Serial.println(numsms);
+    //   if(numsms > 10){
+    //     // grand nombre sms en memoire, trop long a traiter
+    //     Serial.print("num sms > 10, efface tout :"),Serial.println(numsms);
+    //     MajLog("Auto", "numsms > 10 efface tous sms");// renseigne log
+    //     Sim800.delAllSms();
+    //   }
+    //   traite_sms(numsms);// traitement des SMS en attente
+    // }
+    // else if (nsms == 0 && FlagReset) { // on verifie que tous les SMS sont traités avant Reset
+    //   FlagReset = false;
+    //   ResetHard();				//	reset hard
+    // }
+    static uint8_t last_idx = 0;
+    uint8_t idx = modem.newMessageIndex(0); // verifie arrivée sms
+    if (idx > last_idx) last_idx = idx;
+    if (last_idx > 0) {
+      if(last_idx > 10){
         // grand nombre sms en memoire, trop long a traiter
-        Serial.print("num sms > 10, efface tout :"),Serial.println(numsms);
+        Serial.print("num sms > 10, efface tout :"),Serial.println(last_idx);
         MajLog("Auto", "numsms > 10 efface tous sms");// renseigne log
-        Sim800.delAllSms();
+        modem.emptySMSBuffer(); // dell all sms
       }
-      traite_sms(numsms);// traitement des SMS en attente
+      Serial.print("sms recu:"), Serial.println(idx);
+      traite_sms(last_idx);
+      if(last_idx > 0) last_idx --;
     }
-    else if (nsms == 0 && FlagReset) { // on verifie que tous les SMS sont traités avant Reset
+    else if (last_idx == 0 && FlagReset) {
       FlagReset = false;
       ResetHard();				//	reset hard
     }
@@ -913,7 +969,7 @@ void AutoFermeture() {
   Alarm.disable(Auto_F);
 }
 //---------------------------------------------------------------------------
-void traite_sms(byte slot) {
+void traite_sms(uint8_t slot) {
   /* il y a 50 slots dispo
   	si slot=51, demande de balayer tous les slots pour verification (pas utilisé trop long)
   	si slot=99, demande depuis liaison serie en test, traiter sans envoyer de sms
@@ -926,15 +982,15 @@ void traite_sms(byte slot) {
   String nom;
   bool smsserveur = false; // true si le sms provient du serveur index=1
 
-  byte i;
-  byte j;
+  uint8_t i;
+  uint8_t j;
   bool sms = true;
 
   /* Variables pour mode calibration */
   static int tensionmemo = 0;//	memorisation tension batterie lors de la calibration
   int coef = 0; // coeff temporaire
-  static byte P = 0; // Pin entrée a utiliser pour calibration
-  static byte M = 0; // Mode calibration 1,2,3,4
+  static uint8_t P = 0; // Pin entrée a utiliser pour calibration
+  static uint8_t M = 0; // Mode calibration 1,2,3,4
   static bool FlagCalibration = false;	// Calibration Tension en cours
 
   if (slot == 99) sms = false;
@@ -946,22 +1002,31 @@ void traite_sms(byte slot) {
     i = slot;
     j = slot;
   }
-  for (byte k = i; k <= j; k++) {
+  for (uint8_t k = i; k <= j; k++) {
     slot = k;
     // /* Retrieve SMS sender address/phone number. */
     if (sms) {
-      numero = Sim800.getNumberSms(slot); // recupere le Numero appelant
-      nom = Sim800.getNameSms(slot);      // recupere le nom appelant
-      textesms = Sim800.readSms(slot);    // recupere le contenu
-      textesms = ExtraireSms(textesms);
-      if (Sim800.getNumberSms(slot) == Sim800.getPhoneBookNumber(1)) {
+      Sms mylocalstruct=modem.readSmsMessage(slot, true);
+      textesms   = mylocalstruct.message;         // recupere le contenu
+      numero  = mylocalstruct.originatingAddress; // recupere le Numero appelant
+      nom = mylocalstruct.phoneBookEntry;         // recupere le nom appelant
+      Serial.print(F("textesms brut  = ")), Serial.println(textesms);
+      // patch si erreur lecture sms vide
+      if(textesms.length() == 0){
+        textesms = modem.readSMS(slot,true);
+        Serial.print("sms secours: "), Serial.print(textesms),Serial.print(","),Serial.println(textesms.length());
+        textesms = textesms.substring(0, textesms.indexOf(char(13))); // suppression /n/lf a la fin
+        Serial.print("sms secours: "), Serial.print(textesms),Serial.print(","),Serial.println(textesms.length());
+      }
+      // textesms = ExtraireSms(textesms);
+      if (numero == modem.readPhonebookEntry(1).number) {
         smsserveur = true; // si sms provient du serveur index=1
       }
-      if (nom.length() < 1) { // si nom vide, cherche si numero est num de la SIM
-        if (numero == Sim800.getNumTel()) {
-          nom = F("Moi meme");
-        }
-      }
+      // if (nom.length() < 1) { // si nom vide, cherche si numero est num de la SIM
+      //   if (numero == Sim800.getNumTel()) {
+      //     nom = F("Moi meme");
+      //   }
+      // }
       Serial.print(F("Nom appelant = ")), Serial.println(nom);
       Serial.print(F("Numero = ")), Serial.println(numero);
     }
@@ -972,6 +1037,7 @@ void traite_sms(byte slot) {
 
     if (!(textesms.indexOf(F("TEL")) == 0 || textesms.indexOf(F("tel")) == 0 || textesms.indexOf(F("Tel")) == 0
         || textesms.indexOf(F("Wifi")) == 0 || textesms.indexOf(F("WIFI")) == 0 || textesms.indexOf(F("wifi")) == 0
+        || textesms.indexOf(F("MQTTDATA")) > -1 || textesms.indexOf(F("MQTTSERVEUR")) > -1
         || textesms.indexOf(F("GPRSDATA")) > -1 || textesms.indexOf(F("FTPDATA")) > -1 || textesms.indexOf(F("FTPSERVEUR")) > -1)) {
       textesms.toUpperCase();	// passe tout en Maj sauf si "TEL" ou "WIFI" parametres pouvant contenir minuscules
       // textesms.trim();
@@ -1002,8 +1068,8 @@ void traite_sms(byte slot) {
         WifiOff();
       }
       else if (textesms.indexOf(F("Wifi")) == 0) { // demande connexion Wifi
-        byte pos1 = textesms.indexOf(char(44));//","
-        byte pos2 = textesms.indexOf(char(44), pos1 + 1);
+        uint8_t pos1 = textesms.indexOf(char(44));//","
+        uint8_t pos2 = textesms.indexOf(char(44), pos1 + 1);
         String ssids = textesms.substring(pos1 + 1, pos2);
         String pwds  = textesms.substring(pos2 + 1, textesms.length());
         char ssid[20];
@@ -1017,18 +1083,29 @@ void traite_sms(byte slot) {
                || textesms.indexOf(F("Tel")) == 0
                || textesms.indexOf(F("tel")) == 0)) { // entrer nouveau num
         bool FlagOK = true;
+        bool efface = false;
         byte j = 0;
-        String Send	= "AT+CPBW=";// message ecriture dans le phone book
+        String newnumero;
+        String newnom;
+        int indexreplace = 0;
+
         if (textesms.indexOf(char(61)) == 4) { // TELn= reserver correction/suppression
-          int i = textesms.substring(3).toInt();// recupere n° de ligne
+          int i = textesms.substring(3).toInt();// recupere n° de index
           i = i / 1; // important sinon i ne prend pas sa valeur dans les comparaison?
-          //Serial.println(i);
           if (i < 1) FlagOK = false;
-          Send += i;
+          indexreplace = i;// index du PB a remplacer
           j = 5;
           // on efface la ligne sauf la 1 pour toujours garder au moins un numéro
-          if ( (i != 1) && (textesms.indexOf(F("efface")) == 5
-                            || textesms.indexOf(F("EFFACE")) == 5 )) goto fin_tel;
+          if ((i != 1) && (textesms.indexOf(F("efface")) == 5 || textesms.indexOf(F("EFFACE")) == 5 )) {
+            efface = true;
+            bool ok = modem.deletePhonebookEntry(i);
+            if (ok) {
+              message += "entree PB effacee";
+            } else {
+              message += "erreur efface entree PB";
+            }
+            goto fin_tel;
+          }
         }
         else if (textesms.indexOf(char(61)) == 3) { // TEL= nouveau numero
           j = 4;
@@ -1038,13 +1115,8 @@ void traite_sms(byte slot) {
         }
         if (textesms.indexOf("+") == j) {			// debut du num tel +
           if (textesms.indexOf(char(44)) == j + 12) {	// verif si longuer ok
-            String numero = textesms.substring(j, j + 12);
-            String nom = textesms.substring(j + 13, j + 27);// pas de verif si long<>0?
-            Send += F(",\"");
-            Send += numero;
-            Send += F("\",145,\"");
-            Send += nom;
-            Send += F("\"");
+            newnumero = textesms.substring(j, j + 12);
+            newnom = textesms.substring(j + 13, j + 27);// pas de verif si long<>0?
           }
           else {
             FlagOK = false;
@@ -1053,53 +1125,43 @@ void traite_sms(byte slot) {
         else {
           FlagOK = false;
         }
-fin_tel:
+  fin_tel:
         if (!FlagOK) { // erreur de format
-          //Serial.println(F("false"));
-          messageId();
           message += F("Commande non reconnue ?");// non reconnu
           message += fl;
           EnvoyerSms(number, sms);					// SMS non reconnu
         }
         else {
-          Serial.println(Send);
-          if (gsm) {
-            Sim800.WritePhoneBook(Send);					//ecriture dans PhoneBook
-            Alarm.delay(500);
-            Sim800.ModeText(); //pour purger buffer fona
-            Alarm.delay(500);
+          if (!efface) {
+            bool ok = false;
+            if (indexreplace == 0) {
+              ok = modem.addPhonebookEntry(newnumero, newnom); //ecriture dans PhoneBook
+            } else {
+              ok = modem.addPhonebookEntry(newnumero, newnom, indexreplace); //ecriture dans PhoneBook
+            }
+            Alarm.delay(100);
+            if (ok) {
+              message += "Nouvelle entree Phone Book";
+            } else {
+              message += "Erreur entree Phone Book";
+            }
           }
-          messageId();
-          message += F("Nouveau Num Tel: ");
-          message += F("OK");
-          message += fl;
           EnvoyerSms(number, sms);
         }
       }
       else if (gsm && (textesms == F("LST?") || textesms == F("LST1"))) {	//	Liste des Num Tel
-        byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
-        for (byte i = 1; i < n + 1; i++) {
-          String num = Sim800.getPhoneBookNumber(i);
-          // Serial.print(num.length()), Serial.print(" "), Serial.println(num);
-          if (num.indexOf("+CPBR:") == 0) { // si existe pas sortir
-            Serial.println(F("Failed!"));// next i
-            goto fin_i;
-          }
-          String name = Sim800.getPhoneBookName(i);
-          // Serial.println(name);
-          message += String(i) + ":";
-          message += num;
-          message += "," + fl;
-          message += name;
+        for (int idx = 1; idx < 10; idx ++) {
+          if(modem.readPhonebookEntry(idx).number.length() > 0){
+          message += String(idx) + ":";
+          message += modem.readPhonebookEntry(idx).number;
+          message += ",";
+          message += modem.readPhonebookEntry(idx).text;
           message += fl;
-          Serial.println(message);
-          if ((i % 3) == 0) {
-            EnvoyerSms(number, sms);
-            messageId();
+          }else{
+            idx = 11;
           }
         }
-fin_i:
-        if (message.length() > Id.length() + 20) EnvoyerSms(number, sms);; // SMS final
+        EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("ETAT")) == 0 || textesms.indexOf(F("ST")) == 0) {// "ETAT? de l'installation"
         // if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
@@ -1108,16 +1170,15 @@ fin_i:
       }
       else if (textesms.indexOf(F("SYS")) > -1) {
         if (gsm) {
-          Sim800.getetatSIM();// 1s
-          byte n = Sim800.getNetworkStatus();// 1.1s
-          String Op = Sim800.getNetworkName();// 1.05s
+          uint8_t n = modem.getRegistrationStatus();
+
           if (n == 5) {
             message += F(("rmg, "));// roaming 1.0s
           }
-          message += Op + fl;
+          message += modem.getOperator() + fl;
           read_RSSI();
-          int Vbat = Sim800.BattVoltage();
-          byte Batp = Sim800.BattPct();
+          int Vbat = modem.getBattVoltage();
+          uint8_t Batp = modem.getBattPercent();
           message += F("Batt GSM : ");
           message += Vbat;
           message += F(" mV, ");
@@ -1204,15 +1265,15 @@ fin_i:
         EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("MAJHEURE")) == 0) {	//	forcer mise a l'heure
-        message += F("Mise a l'heure");
-        // Sim800.reset(SIMPIN);// lancer SIM800
-        if (gsm)MajHeure(Sim800.getTimeSms(slot)); // mise a l'heure du sms
-        if (nom != F("Moi meme")) EnvoyerSms(number, sms);
+        // message += F("Mise a l'heure");
+        // // Sim800.reset(SIMPIN);// lancer SIM800
+        // if (gsm)MajHeure(Sim800.getTimeSms(slot)); // mise a l'heure du sms
+        // if (nom != F("Moi meme")) EnvoyerSms(number, sms);
       }
       else if (gsm && textesms.indexOf(F("IMEI")) > -1) {
         message += F("IMEI = ");
-        String m = Sim800.getIMEI();
-        message += m + fl;
+        String m = modem.getIMEI();
+        message += String(modem.getIMEI()) + fl;
         EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf(F("FIN")) == 0) {			//	Heure Fin de journée
@@ -1308,8 +1369,8 @@ fin_i:
         // de 100 à 0 pas de 10
         // LUMLUT=95,90,80,75,60,50,40,30,30,30,30
         bool flag = true; // validation du format
-        byte nv = 0; // compteur virgule
-        byte p1 = 0; // position virgule
+        uint8_t nv = 0; // compteur virgule
+        uint8_t p1 = 0; // position virgule
         if (textesms.indexOf("{") == 0) { // json
           DynamicJsonDocument doc(200);
           int f = textesms.lastIndexOf("}");
@@ -1346,7 +1407,7 @@ fin_i:
           // }
           if (flag) { // format ok
             p1 = 0;
-            byte p2 = 0;
+            uint8_t p2 = 0;
             for (int i = 0; i < 11; i++) {
               p2 = Sbidon.indexOf(char(44), p1 + 1); // ,
               TableLum[i][1] = Sbidon.substring(p1, p2).toInt();
@@ -1415,8 +1476,8 @@ fin_i:
           }
         }
         else { // message normal mois=12,31*0/1
-          byte p1 = textesms.indexOf(char(61)); // =
-          byte p2 = textesms.indexOf(char(44)); // ,
+          uint8_t p1 = textesms.indexOf(char(61)); // =
+          uint8_t p2 = textesms.indexOf(char(44)); // ,
           if (p2 == 255) {                      // pas de ,
             p2 = textesms.indexOf(char(63));    // ?
             W = false;
@@ -1547,7 +1608,7 @@ fin_i:
       else if (textesms.indexOf(F("LST2")) > -1) { //	Liste restreinte	//  =LST2=0,0,0,0,0,0,0,0,0
         bool flag = true; // validation du format
         if (textesms.indexOf(char(61)) == 4) { // "="
-          byte Num[10];
+          uint8_t Num[10];
           Sbidon = textesms.substring(5, 22);
           // Serial.print("bidon="),Serial.print(Sbidon),Serial.print("="),Serial.println(Sbidon.length());
           if (Sbidon.length() == 17) {
@@ -1992,22 +2053,23 @@ fin_i:
         message += fl;
         MajLog(nom, "upload log");// renseigne log
         Sbidon = String(config.apn);
-        Sim800.activateBearerProfile(config.apn); // ouverture GPRS
+        // Sim800.activateBearerProfile(config.apn); // ouverture GPRS
+        if(modem.isGprsConnected()){
+          Serial.println(F("Starting..."));
+          int reply = gprs_upload_function (); // Upload fichier
+          Serial.println("The end... Response: " + String(reply));
 
-        Serial.println(F("Starting..."));
-        int reply = gprs_upload_function (); // Upload fichier
-        Serial.println("The end... Response: " + String(reply));
-
-        if(reply == 0){
-          message += F("upload OK");
-          SPIFFS.remove(filelog);  // efface fichier log
-          MajLog(nom, "");         // nouveau log
-          MajLog(nom, F("upload OK"));// renseigne nouveau log
-        } else{
-          message += F("upload fail");
-          MajLog(nom, F("upload fail"));// renseigne log
+          if(reply == 0){
+            message += F("upload OK");
+            SPIFFS.remove(filelog);  // efface fichier log
+            MajLog(nom, "");         // nouveau log
+            MajLog(nom, F("upload OK"));// renseigne nouveau log
+          } else{
+            message += F("upload fail");
+            MajLog(nom, F("upload fail"));// renseigne log
+          }
         }
-        Sim800.deactivateBearerProfile(); // fermeture GPRS
+        // Sim800.deactivateBearerProfile(); // fermeture GPRS
         EnvoyerSms(number, sms);
       }
       else if (textesms.indexOf("FTPDATA") > -1) {
@@ -2032,10 +2094,10 @@ fin_i:
       }
       else if ((textesms.indexOf(char(61))) == 7) { // format sms
         formatsms = true;
-        byte w = textesms.indexOf(":");
-        byte x = textesms.indexOf(":", w + 1);
-        byte y = textesms.indexOf(":", x + 1);
-        byte zz = textesms.length();
+        uint8_t w = textesms.indexOf(":");
+        uint8_t x = textesms.indexOf(":", w + 1);
+        uint8_t y = textesms.indexOf(":", x + 1);
+        uint8_t zz = textesms.length();
         if (textesms.substring(y + 1, zz).toInt() > 0) { // Port > 0
           if ((w - 7) < 25 && (x - w - 1) < 11 && (y - x - 1) < 16) {
             Sbidon = textesms.substring(7, w);
@@ -2125,17 +2187,17 @@ fin_i:
         }
         else if ((textesms.indexOf(char(61))) == 8) { // format sms
           formatsms = true;
-          byte cpt = 0;
-          byte i = 9;
+          uint8_t cpt = 0;
+          uint8_t i = 9;
           do { // compte nombre de " doit etre =6
             i = textesms.indexOf('"', i + 1);
             cpt ++;
           } while (i <= textesms.length());
           Serial.print("nombre de \" :"), Serial.println(cpt);
           if (cpt == 6) {
-            byte x = textesms.indexOf(':');
-            byte y = textesms.indexOf(':', x + 1);
-            byte z = textesms.lastIndexOf('"');
+            uint8_t x = textesms.indexOf(':');
+            uint8_t y = textesms.indexOf(':', x + 1);
+            uint8_t z = textesms.lastIndexOf('"');
             // Serial.printf("%d:%d:%d\n",x,y,z);
             // Serial.printf("%d:%d:%d\n", x -1 - 10, y-1 - x-1-1, z - y-1-1);
             if ((x - 11) < 11 && (y - x - 3) < 11 && (z - y - 2) < 11) { // verification longueur des variables
@@ -2240,7 +2302,8 @@ void envoie_alarme() {
   }
 }
 //---------------------------------------------------------------------------
-void envoieGroupeSMS(byte grp, bool m) {
+void envoieGroupeSMS(uint8_t grp, bool m) {
+  generationMessage(m);
   if (gsm) {
     /* m=0 message normal/finanalyse
     	si grp = 0,
@@ -2252,19 +2315,23 @@ void envoieGroupeSMS(byte grp, bool m) {
       si grp = 3,
       Message au Serveur seulement N°1 de la liste			*/
 
-    byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
-    // Serial.print(F("Nombre de ligne PB=")),Serial.println(n);
+    uint8_t n = 10;
     if (grp == 3) n = 1; // limite la liste à ligne 1
-    for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
-      if ((grp == 3) || (grp == 0 && config.Pos_Pn_PB[Index] == 0) || (grp == 1 && config.Pos_Pn_PB[Index] == 1)) {
-        String number = Sim800.getPhoneBookNumber(Index);
-        generationMessage(m);
-        char num[13];
-        number.toCharArray(num, 13);
-        EnvoyerSms(num, true);
+    for (uint8_t idx = 1; idx < n + 1; idx++) { // Balayage des Num Tel dans Phone Book
+      if(modem.readPhonebookEntry(idx).number.length() > 0){
+        if ((grp == 3) || (grp == 0 && config.Pos_Pn_PB[idx] == 0) || (grp == 1 && config.Pos_Pn_PB[idx] == 1)) {
+          if (!modem.sendSMS(modem.readPhonebookEntry(idx).number, message)) {
+            Serial.println(F("Envoi SMS Failed"));
+          } else {
+            Serial.println(F("SMS Sent OK"));
+          }
+        }
+      }else{
+        idx = 11;
       }
     }
   }
+  Serial.println(message);
 }
 //---------------------------------------------------------------------------
 void generationMessage(bool n) {
@@ -2358,23 +2425,34 @@ void generationMessage(bool n) {
 }
 //---------------------------------------------------------------------------
 void EnvoyerSms(char *num, bool sms) {
-
-  if (sms && gsm) { // envoie sms
-    message.toCharArray(replybuffer, message.length() + 1);
-    bool OK = Sim800.sendSms(num, replybuffer);
-    if (OK) {
-      Serial.print(F("send sms OK:"));
-      Serial.println(num);
+  if (sms && gsm) {
+    if (!modem.sendSMS(num, message)) {
+      Serial.println(F("Envoi SMS Failed"));
+    } else {
+      Serial.println(F("SMS Sent OK"));
     }
   }
   Serial.print (F("Message (long) = ")), Serial.println(message.length());
+  Serial.println(F("****************************"));
   Serial.println(message);
+  Serial.println(F("****************************"));
+
+  // if (sms && gsm) { // envoie sms
+  //   message.toCharArray(replybuffer, message.length() + 1);
+  //   bool OK = Sim800.sendSms(num, replybuffer);
+  //   if (OK) {
+  //     Serial.print(F("send sms OK:"));
+  //     Serial.println(num);
+  //   }
+  // }
+  // Serial.print (F("Message (long) = ")), Serial.println(message.length());
+  // Serial.println(message);
 }
 //---------------------------------------------------------------------------
 void read_RSSI() {	// lire valeur RSSI et remplir message
   if (gsm) {
     int r;
-    byte n = Sim800.getRSSI();
+    uint8_t n = modem.getSignalQuality();
     // Serial.print(F("RSSI = ")); Serial.print(n); Serial.print(F(": "));
     if (n == 0) r = -115;
     if (n == 1) r = -111;
@@ -2404,64 +2482,48 @@ void MajHeure(String smsdate) {
       format date retourné par Fona "yy/MM/dd,hh:mm:ss±zz",
       +CCLK: "14/08/08,02:25:43-16" -16= décalage GMT en n*1/4heures(-4) */
     if (smsdate.length() > 1) { // si smsdate present mise a l'heure forcé
-      Sim800.SetTime(smsdate);
     }
     static bool First = true;
     int ecart;
     Serial.print(F("Mise a l'heure reguliere !, "));
-    // setTime(10,10,0,1,1,18);
-    int Nday, Nmonth, Nyear, Nminute, Nsecond, Nhour;
-    Sim800.RTCtime(&Nday, &Nmonth, &Nyear, &Nhour, &Nminute, &Nsecond);
+    int rep = modem.NTPServerSync();
+    if(rep){
+      String mytime = modem.getGSMDateTime(DATE_FULL);// "yy/MM/dd,hh:mm:ss±zz"
+      Serial.print("heurentp:"),Serial.println(mytime);
+      if(First){
+        //   setTime(hr, mn, sec, dy, mnth, yr);
+        setTime(mytime.substring(9,11).toInt(),
+                mytime.substring(12,14).toInt(),
+                mytime.substring(15,17).toInt(),
+                mytime.substring(6,8).toInt(),
+                mytime.substring(3,5).toInt(),
+                mytime.substring(0,2).toInt());
+        First = false;
+      } else {
+        //  calcul décalage entre H sys et H reseau en s
+        ecart  = (mytime.substring(9,11).toInt() - hour()) * 3600;
+        ecart += (mytime.substring(12,14).toInt() - minute()) * 60;
+        ecart += (mytime.substring(15,17).toInt()- second()) * 60;
+        Serial.print(F("Ecart s= ")), Serial.println(ecart);
+        if (abs(ecart) > 5) {
+          // ArretSonnerie();	// Arret Sonnerie propre
+          Alarm.disable(loopPrincipale);
+          Alarm.disable(DebutJour);
+          Alarm.disable(FinJour);
+          Alarm.disable(Auto_F);
 
+          setTime(mytime.substring(9,11).toInt(),
+                mytime.substring(12,14).toInt(),
+                mytime.substring(15,17).toInt(),
+                mytime.substring(6,8).toInt(),
+                mytime.substring(3,5).toInt(),
+                mytime.substring(0,2).toInt());
 
-    printf("%s %02d/%02d/%d %02d:%02d:%02d\n", "MajH1", Nday, Nmonth, Nyear, Nhour, Nminute, Nsecond);
-    long debut = millis();
-    if (First || Nyear < 17) {
-      while (Nyear < 17) {
-        Sim800.RTCtime(&Nday, &Nmonth, &Nyear, &Nhour, &Nminute, &Nsecond);
-        printf("%s %02d/%02d/%d %02d:%02d:%02d\n", "MajH2", Nday, Nmonth, Nyear, Nhour, Nminute, Nsecond);
-        Alarm.delay(1000);
-        // if (millis() - debut > 10000) {// supprimé risque de deconnexion reseau plus de redemarage
-        // Sim800.setPhoneFunctionality(0);
-        // Alarm.delay(1000);
-        // Sim800.setPhoneFunctionality(1);
-        // Alarm.delay(1000);
-        // }
-        if (millis() - debut > 15000) {
-          Serial.println(F("Impossible de mettre à l'heure !"));
-          //on s'envoie à soi même un SMS "MAJHEURE"
-          message = F("MAJHEURE");
-          char numchar[13];
-          String numstring = Sim800.getNumTel();
-          numstring.toCharArray(numchar, 13);
-          MajLog("Auto", "envoie sms soi meme pour majheure");// renseigne log
-          EnvoyerSms(numchar, true);
-          break;
+          Alarm.enable(loopPrincipale);
+          Alarm.enable(DebutJour);
+          Alarm.enable(FinJour);
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         }
-      }
-      setTime(Nhour, Nminute, Nsecond, Nday, Nmonth, Nyear);
-      First = false;
-    }
-    else {
-      //  calcul décalage entre H sys et H reseau en s
-      ecart = (Nhour - hour()) * 3600;
-      ecart += (Nminute - minute()) * 60;
-      ecart += Nsecond - second();
-      // ecart += 10;
-      Serial.print(F("Ecart s= ")), Serial.println(ecart);
-      if (abs(ecart) > 5) {
-        // ArretSonnerie();	// Arret Sonnerie propre
-        Alarm.disable(loopPrincipale);
-        Alarm.disable(DebutJour);
-        Alarm.disable(FinJour);
-        Alarm.disable(Auto_F);
-
-        setTime(Nhour, Nminute, Nsecond, Nday, Nmonth, Nyear);
-
-        Alarm.enable(loopPrincipale);
-        Alarm.enable(DebutJour);
-        Alarm.enable(FinJour);
-        if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
       }
     }
   }
@@ -2497,7 +2559,7 @@ void SignalVie() {
   if (gsm) {
     MajHeure("");
     // envoieGroupeSMS(0, 0);
-    Sim800.delAllSms();// au cas ou, efface tous les SMS envoyé/reçu
+    modem.emptySMSBuffer(); // dell all sms
   }
 
   if ((calendrier[month()][day()] ^ flagCircule) && jour) { // jour circulé
@@ -2525,7 +2587,7 @@ void sauvConfig() { // sauve configuration en EEPROM
   EEPROM.end();
 }
 //---------------------------------------------------------------------------
-String displayTime(byte n) {
+String displayTime(uint8_t n) {
   // n = 0 ; dd/mm/yyyy hh:mm:ss
   // n = 1 ; yyyy-mm-dd hh:mm:ss
   char bid[20];
@@ -2669,7 +2731,7 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
       message += String(f.size());
       message += F("\nFichier sera efface a 300000");
       if (gsm) {
-        String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
+        String number = modem.readPhonebookEntry(1).number; // envoyé au premier num seulement
         char num[13];
         number.toCharArray(num, 13);
         EnvoyerSms(num, true);
@@ -2681,7 +2743,7 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
       message += String(f.size());
       message += F("\nFichier efface");
       if (gsm) {
-        String number = Sim800.getPhoneBookNumber(1); // envoyé au premier num seulement
+        String number = modem.readPhonebookEntry(1).number; // envoyé au premier num seulement
         char num[13];
         number.toCharArray(num, 13);
         EnvoyerSms(num, true);
@@ -2874,6 +2936,13 @@ void PrintEEPROM() {
   Serial.print(F("ftp port = ")), Serial.println(config.ftpPort);
   Serial.print(F("ftp user = ")), Serial.println(config.ftpUser);
   Serial.print(F("ftp pass = ")), Serial.println(config.ftpPass);
+  Serial.print(F("mqttServeur = "))             , Serial.println(config.mqttServer);
+  Serial.print(F("mqttPort = "))                , Serial.println(config.mqttPort);
+  Serial.print(F("mqttUserName = "))            , Serial.println(config.mqttUserName);
+  Serial.print(F("mqttPass = "))                , Serial.println(config.mqttPass);
+  Serial.print(F("writeTopic = "))              , Serial.println(config.writeTopic);
+  Serial.print(F("readTopic = "))               , Serial.println(config.readTopic);
+  Serial.print(F("permanentTopic = "))          , Serial.println(config.permanentTopic);
 }
 //---------------------------------------------------------------------------
 void ConnexionWifi(char* ssid, char* pwd, char* number, bool sms) {
@@ -2883,7 +2952,7 @@ void ConnexionWifi(char* ssid, char* pwd, char* number, bool sms) {
   String ip;
   WiFi.begin(ssid, pwd);
   // WiFi.mode(WIFI_STA);
-  byte timeout = 0;
+  uint8_t timeout = 0;
   bool error = false;
 
   while (WiFi.status() != WL_CONNECTED) {
@@ -3140,9 +3209,9 @@ void DebutSleep() {
   //Go to sleep now
   Serial.println(F("Going to sleep now"));
 
-  byte i = 0;
+  uint8_t i = 0;
   if (gsm) {
-    while (!Sim800.sleep()) {
+    while (!modem.sleepEnable()) {
       Alarm.delay(100);
       if (i++ > 10) break;
     }
@@ -3156,12 +3225,12 @@ void DebutSleep() {
 
 }
 //---------------------------------------------------------------------------
-void action_wakeup_reason(byte wr) { // action en fonction du wake up
+void action_wakeup_reason(uint8_t wr) { // action en fonction du wake up
   Serial.print(F("Wakeup :")), Serial.print(wr);
   Serial.print(F(", jour :")), Serial.print(jour);
   Serial.print(F(" ,Calendrier :")), Serial.print(calendrier[month()][day()]);
   Serial.print(F(" ,flagCircule :")), Serial.println(flagCircule);
-  byte pin = 0;
+  uint8_t pin = 0;
   Serial.println(F("***********************************"));
   if (wr == 99 || wr == 32 || wr == 33 || wr == 34) {
     pin = wr;
@@ -3312,13 +3381,13 @@ int get_wakeup_reason() {
 //---------------------------------------------------------------------------
 void EffaceSMS(int s) {
   bool err;
-  byte n = 0;
+  uint8_t n = 0;
   do {
-    err = Sim800.delSms(s);
+    err = modem.deleteSmsMessage(s);
     n ++;
     Serial.print(F("resultat del Sms "));	Serial.println(err);
     if (n > 10) { // on efface tous si echec
-      err = Sim800.delAllSms();
+      err = modem.emptySMSBuffer(); // dell all sms
       Serial.print(F("resultat delall Sms "));	Serial.println(err);
       break;
     }
@@ -3376,7 +3445,7 @@ void read_adc(int pin1, int pin2, int pin3, int pin4, int pin5) {
   static int plus_ancien = 0;
   //acquisition
   int sample[5];
-  for (byte i = 0; i < 5; i++) {
+  for (uint8_t i = 0; i < 5; i++) {
     if (i == 0)sample[i] = moyenneAnalogique(pin1);
     if (i == 1)sample[i] = moyenneAnalogique(pin2);
     if (i == 2)sample[i] = moyenneAnalogique(pin3);
@@ -3594,26 +3663,19 @@ void Tel_listPage() {
   webpage += F("<th> Liste restreinte </th>");
   webpage += F("</tr>");
   if (gsm) {
-    byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
-    for (byte i = 1; i < n + 1; i++) {
-      String num = Sim800.getPhoneBookNumber(i);
-      // Serial.print(num.length()), Serial.print(" "), Serial.println(num);
-      if (num.indexOf("+CPBR:") == 0) { // si existe pas sortir
-        Serial.println(F("Failed!"));// next i
-        goto fin_liste;
+    for (int idx = 1; idx < 10; idx ++) {
+      if(modem.readPhonebookEntry(idx).number.length() > 0){
+        webpage += F("<tr>");
+        webpage += F("<td>"); webpage += String(modem.readPhonebookEntry(idx).text); webpage += F("</td>");
+        webpage += F("<td>"); webpage += String(modem.readPhonebookEntry(idx).number); webpage += F("</td>");
+        webpage += F("<td>"); webpage += String(config.Pos_Pn_PB[idx]); webpage += F("</td>");
+        webpage += F("</tr>");
+      } else {
+        idx = 11;
       }
-      String name = Sim800.getPhoneBookName(i);
-      // Serial.println(name);
-      webpage += F("<tr>");
-      webpage += F("<td>"); webpage += name; webpage += F("</td>");
-      webpage += F("<td>"); webpage += num ; webpage += F("</td>");
-      webpage += F("<td>"); webpage += String(config.Pos_Pn_PB[i]); webpage += F("</td>");
-      webpage += F("</tr>");
     }
   }
-fin_liste:
-
-
+// fin_liste:
   webpage += F("</table><br>");
   append_page_footer();
   SendHTML_Content();
@@ -3887,11 +3949,11 @@ void handleDateTime() { // getion Date et heure page web
   server.send(200, "text/plane", String(time_str)); //Send Time value only to client ajax request
 }
 //---------------------------------------------------------------------------
-byte gprs_upload_function (){
+uint8_t gprs_upload_function (){
   // https://forum.arduino.cc/index.php?topic=376911.15
   int buffer_space = 1000;
   UploadFile = SPIFFS.open(filelog, "r");
-  byte reply = 1;
+  uint8_t reply = 1;
   int i = 0;
   // ne fonctionne pas dans tous les cas ex roaming
   // while (i < 10 && reply == 1){ //Try 10 times...
@@ -3986,8 +4048,8 @@ if (reply == 0){
 return reply;
 }
 //---------------------------------------------------------------------------
-byte sendATcommand(String ATcommand, String answer1, String answer2, unsigned int timeout){
-  byte reply = 1;
+uint8_t sendATcommand(String ATcommand, String answer1, String answer2, unsigned int timeout){
+  uint8_t reply = 1;
   String content = "";
   char character;
 
@@ -4155,7 +4217,7 @@ void gestionTaquet(){
         char number[13];
         Memo_Demande_Feux[1].toCharArray(number, Memo_Demande_Feux[1].length() + 1);
         bool smsserveur = false;
-        if (Memo_Demande_Feux[1] == Sim800.getPhoneBookNumber(1)) {
+        if (Memo_Demande_Feux[1] == modem.readPhonebookEntry(1).number) {
           smsserveur = true; // si demande provient du serveur index=1
         }
         if(Memo_Demande_Feux[0] != "console"){
@@ -4191,6 +4253,39 @@ void gestionTaquet(){
     }
     envoieGroupeSMS(3, 0); // envoie serveur
     FlagLastTqt_2 = FlagTqt_2;
+  }
+}
+//---------------------------------------------------------------------------
+void ConnectGPRS(){
+  Serial.print(F("Connecting to "));
+  Serial.print(config.apn);
+  if (modem.gprsConnect(config.apn, config.gprsUser, config.gprsPass)) {
+    Serial.println(F(". success"));
+  }
+  else {
+    Serial.println(" fail");
+  }
+}
+//---------------------------------------------------------------------------
+void mqttConnect() {
+  // 7) Use the MQTTConnect function to set up and maintain a connection to the MQTT. This function generates a random client ID for connecting to the ThingSpeak MQTT server.
+  int cpt = 0;
+  if (modem.isGprsConnected()) {
+    // Loop until connected.
+    while ( !mqttClient.connected()) {
+      // Connect to the MQTT broker.
+      Serial.print("Attempting MQTT connection...");
+      if ( mqttClient.connect(config.Idchar, config.mqttUserName, config.mqttPass)) {
+        Serial.println( "Connected with Client ID:  " + String(config.Idchar) + " User " + String(config.mqttUserName) + " Pwd " + String(config.mqttPass));
+      } else {
+        Serial.print( "failed, rc = " );
+        // See https://pubsubclient.knolleary.net/api.html#state for the failure code explanation.
+        Serial.print( mqttClient.state() );
+        Serial.println( " Will try again in 5 seconds" );
+        // Alarm.delay(5000);
+        break;
+      }
+    }
   }
 }
 /* --------------------  test local serial seulement ----------------------*/
