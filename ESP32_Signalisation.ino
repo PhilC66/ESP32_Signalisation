@@ -66,20 +66,17 @@
 
 
 	to do
-  jour non circule continue sans sleep voir log 26/10
-  corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
-  V3-00 to do 
-  heuredate Y<2020 remise à l'heure
-  verif CNTP heure ete/hiver?
+  V3-00
   
   1- remplacement biblio GSM
   2- suppression EEPROM, config sauvgardé en SPIFFS
+  3- suppression MQTTDATA en sms
 
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
-  Arduino IDE 1.8.16 : 1017202 77%, 47928 14% sur PC
-  Arduino IDE 1.8.16 : 1017178 77%, 47928 14% sur raspi
+  Arduino IDE 1.8.16 : 1020750 77%, 48032 14% sur PC
+  Arduino IDE 1.8.16 :  77%,  14% sur raspi
 
 
 
@@ -105,7 +102,7 @@
 #include <credentials_tpcf.h>
 
 String ver        = "V3-00";
-int    Magique    = 20;
+int    Magique    = 21;
 
 String  webpage = "";
 #define ServerVersion "1.0"
@@ -166,7 +163,6 @@ String message;
 String bufferrcpt;
 String fl = "\n";                   //  saut de ligne SMS
 String Id ;                         //  Id du materiel
-// char   SIM800InBuffer[64];          //  for notifications from the SIM800
 char   replybuffer[255];            //  Buffer de reponse SIM800
 volatile int IRQ_Cpt_Ip1  = 0;      //  IRQ Ip1
 volatile int IRQ_Cpt_Ip2  = 0;      //  IRQ Ip2
@@ -254,7 +250,7 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   char    mqttUserName[11]; // MQTT User
   char    mqttPass[16];    // MQTT pass
   char    sendTopic[20];   // channel Id output to server commun à tous
-  char    receiveTopic[17];// channel Id input from server
+  char    receiveTopic[20];// channel Id input from server
   char    permanentTopic[20];  // channel Id
   int     mqttPort;        // Port serveur MQTT
   bool    messageMode;     // false = sms,true=sms+mqtt pour message generé automatiquement
@@ -272,9 +268,6 @@ AlarmId FinJour;           // Fin de journée retour deep sleep
 AlarmId Auto_F;            // Tempo AutoF
 
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-
-// HardwareSerial *SIM800Serial = &Serial2; // liaison serie FONA SIM800
-// Sim800l Sim800;                          // to declare the library
 
 //---------------------------------------------------------------------------
 void IRAM_ATTR handleInterruptIp1() { // Entrée 1
@@ -395,9 +388,6 @@ tempServer   = "philippeco.hopto.org";//exploitation.tpcf.fr
     tempmqttUserName.toCharArray(config.mqttUserName, (tempmqttUserName.length() + 1));
     tempmqttPass.toCharArray(config.mqttPass, (tempmqttPass.length() + 1));
 
-    // memcpy(config.sendTopic,&config.Idchar[5],5);
-    // config.sendTopic[5] = '\0';
-    // strcat(config.sendTopic,"/input");
     strncpy(config.sendTopic,("Signalisation/input"),sizeof(config.sendTopic));
     memcpy(config.receiveTopic,&config.Idchar[5],5);
     config.receiveTopic[5] = '\0';
@@ -405,9 +395,6 @@ tempServer   = "philippeco.hopto.org";//exploitation.tpcf.fr
     memcpy(config.permanentTopic,&config.Idchar[5],5);
     config.permanentTopic[5] = '\0';
     strcat(config.permanentTopic,"/permanent");
-    // strncpy(config.sendTopic,"/input",sizeof(config.sendTopic));
-    // strncpy(config.receiveTopic,"/output",sizeof(config.receiveTopic));
-    // strncpy(config.permanentTopic,"/permanent",sizeof(config.permanentTopic));
     config.mqttPort = tempmqttPort;
     config.messageMode = false;
 
@@ -453,12 +440,6 @@ tempServer   = "philippeco.hopto.org";//exploitation.tpcf.fr
   OuvrirLumLUT();             // ouvre le fichier lumLUT
   OuvrirCalendrier();					// ouvre calendrier circulation en SPIFFS
   
-
-  // Serial.print(F("temps =")),Serial.println(millis());
-  // if (gsm) {
-    // Sim800.reset(SIMPIN);					// lancer SIM800
-    // MajHeure("");
-  // }
   if (gsm) {
     pinMode(RESET_PIN,OUTPUT);
     digitalWrite(RESET_PIN,HIGH);
@@ -468,7 +449,6 @@ tempServer   = "philippeco.hopto.org";//exploitation.tpcf.fr
     digitalWrite(RESET_PIN,HIGH);
     delay(1000);
     Serial.println("lancement SIM800");
-    // modem.restart();
     modem.init(GSM_PIN);
     Serial.println("Initializing modem...");
     String modemInfo = modem.getModemInfo();
@@ -525,6 +505,14 @@ tempServer   = "philippeco.hopto.org";//exploitation.tpcf.fr
     // Allumage();
   // }
   MajLog("Auto","Lancement");
+
+  if(modem.readmyPhonebookEntry().number.length() > 0){
+    message += modem.readmyPhonebookEntry().text;
+    message += ", ";
+    message += modem.readmyPhonebookEntry().number;
+    message += fl;
+  }
+  Serial.print("myphonenumber: "),Serial.println(message);
 }
 //---------------------------------------------------------------------------
 void loop() {
@@ -534,7 +522,7 @@ void loop() {
   if (rebond2 > millis()) rebond2 = millis();
   static unsigned int t0 = millis();
   bool first = true;
-  if(gsm){
+  if(gsm && config.messageMode == 1){
     if (!mqttClient.connected() && ((millis()- t0) > 5000 || first)){
   // ***** prevoir un timeout si pb ***************************************************************
         mqttConnect(); // Connect if MQTT client is not connected.
@@ -619,9 +607,6 @@ void Acquisition() {
     OuvrirFichierCalibration(); // patch relecture des coeff perdu
   }
 
-  // if (gsm) {
-  //   if (!Sim800.getetatSIM())Sim800.reset(SIMPIN); // verification SIM
-  // }
   Serial.println(displayTime(0));
   // Serial.print(F(" Freemem = ")), Serial.println(ESP.getFreeHeap());
   static byte nalaTension = 0;
@@ -922,6 +907,7 @@ void traite_sms(byte slot) {
   textesms.reserve(140);
   String numero;
   String nom;
+  String datesms;
   bool smsserveur = false; // true si le sms provient du serveur index=1, ou MQTT
 
   // bool sms = true;
@@ -947,6 +933,7 @@ void traite_sms(byte slot) {
     textesms = mylocalstruct.message;            // recupere le contenu
     numero   = mylocalstruct.originatingAddress; // recupere le Numero appelant
     nom      = mylocalstruct.phoneBookEntry;     // recupere le nom appelant
+    datesms  = mylocalstruct.serviceCentreTimeStamp;     // date/heure reseau
     Serial.print(F("textesms brut  = ")), Serial.println(textesms);
     // patch si erreur lecture sms vide
     if(textesms.length() == 0){
@@ -958,11 +945,11 @@ void traite_sms(byte slot) {
     if (numero == modem.readPhonebookEntry(1).number) {
       smsserveur = true; // si sms provient du serveur index=1
     }
-    // if (nom.length() < 1) { // si nom vide, cherche si numero est num de la SIM
-    //   if (numero == Sim800.getNumTel()) {
-    //     nom = F("Moi meme");
-    //   }
-    // }
+    if (nom.length() < 1) { // si nom vide, cherche si numero est num de la SIM
+      if (numero == modem.readmyPhonebookEntry().number) {
+        nom = F("Moi meme");
+      }
+    }
     Serial.print(F("Nom appelant = ")), Serial.println(nom);
     Serial.print(F("Numero = ")), Serial.println(numero);
   }
@@ -1147,9 +1134,6 @@ fin_tel:
       if (temp.length() > 0 && temp.length() < 11) {
         Id = "";
         temp.toCharArray(config.Idchar, 11);
-        // memcpy(config.sendTopic,&config.Idchar[5],5);
-        // config.sendTopic[5] = '\0';
-        // strcat(config.sendTopic,"/input");
         strncpy(config.sendTopic,("Signalisation/input"),sizeof(config.sendTopic));
         memcpy(config.receiveTopic,&config.Idchar[5],5);
         config.receiveTopic[5] = '\0';
@@ -1171,17 +1155,6 @@ fin_tel:
       message += fl;
       EnvoyerSms(number, slot);
     }
-    // else if (textesms.indexOf(F("LOG")) == 0) {	// demande log des 5 derniers commandes
-    //   File f = SPIFFS.open(filelog, "r"); // taille du fichier log en SPIFFS
-    //   message = F("local log size :");
-    //   message += String(f.size()) + fl;
-    //   f.close();
-    //   for (int i = 0; i < 5; i++) {
-    //     message += String(record[i].dt) + "," + String(record[i].Act) + "," + String(record[i].Name) + fl;
-    //   }
-    //   //Serial.println( message);
-    //   EnvoyerSms(number, slot);
-    // }
     else if (textesms.indexOf(F("ANTICIP")) > -1) { // Anticipation du wakeup
       if (textesms.indexOf(char(61)) == 7) {
         int n = textesms.substring(8, textesms.length()).toInt();
@@ -1221,11 +1194,16 @@ fin_tel:
       EnvoyerSms(number, slot);
     }
     else if (textesms.indexOf(F("MAJHEURE")) == 0) {	//	forcer mise a l'heure
-      // message += F("Mise a l'heure");
-      // // Sim800.reset(SIMPIN);// lancer SIM800
-      // if (gsm)MajHeure(Sim800.getTimeSms(slot)); // mise a l'heure du slot
-      // if (nom != F("Moi meme")) EnvoyerSms(number, slot);
-      MajHeure("");
+      message += "Mise a l'heure" + fl;
+      if (gsm){
+        if(config.messageMode == 0){
+          MajHeure(datesms); // mise a l'heure du slot
+          message += datesms;
+          if (nom != F("Moi meme")) EnvoyerSms(number, slot);
+        }else{
+          MajHeure("");
+        }
+      }
     }
     else if (gsm && textesms.indexOf(F("IMEI")) > -1) {
       message += F("IMEI = ");
@@ -2008,7 +1986,6 @@ fin_tel:
       message += fl;
       MajLog(nom, "upload log");// renseigne log
       Sbidon = String(config.apn);
-      // Sim800.activateBearerProfile(config.apn); // ouverture GPRS
       if(modem.isGprsConnected()){
         Serial.println(F("Starting..."));
         int reply = gprs_upload_function (); // Upload fichier
@@ -2024,7 +2001,6 @@ fin_tel:
           MajLog(nom, F("upload fail"));// renseigne log
         }
       }
-      // Sim800.deactivateBearerProfile(); // fermeture GPRS
       EnvoyerSms(number, slot);
     }
     else if (textesms.indexOf("FTPDATA") > -1) {
@@ -2113,6 +2089,67 @@ fin_tel:
       }
       message += F("FTPserveur =");
       message += String(config.ftpServeur);
+      message += F("\n au prochain demarrage");
+      EnvoyerSms(number, slot);
+    }
+    else if (textesms.indexOf("MQTTDATA") > -1) {
+      // Parametres MQTTDATA=serveur:user:pass:port:permanent_topic:send_topic:receive_topic
+
+      bool erreur = false;
+      bool formatsms = false;
+      if (textesms.indexOf(":") == 11) { // format json
+        DynamicJsonDocument doc(384); //https://arduinojson.org/v6/assistant/
+        DeserializationError err = deserializeJson(doc, textesms);
+        if (err) {
+          erreur = true;
+        }
+        else {
+          JsonObject mqttdata = doc["MQTTDATA"];
+          strncpy(config.mqttServer,     mqttdata["serveur"],         26);
+          strncpy(config.mqttUserName,   mqttdata["user"],            11);
+          strncpy(config.mqttPass,       mqttdata["pass"],            16);
+          config.mqttPort            =   mqttdata["port"];
+          strncpy(config.permanentTopic, mqttdata["permanent_topic"], 20);
+          strncpy(config.sendTopic,      mqttdata["send_topic"],      20);
+          strncpy(config.receiveTopic,   mqttdata["receive_topic"],   17);
+          Write_Config();													// sauvegarde en SPIFFS
+        }
+      }
+      
+      if (!erreur) {
+        DynamicJsonDocument doc(256);
+        JsonObject MQTTDATA = doc.createNestedObject("MQTTDATA");
+        MQTTDATA["serveur"] = config.mqttServer;
+        MQTTDATA["user"]    = config.mqttUserName;
+        MQTTDATA["pass"]    = config.mqttPass;
+        MQTTDATA["port"]    = config.mqttPort;
+        MQTTDATA["permanent_topic"]   = config.permanentTopic;
+        MQTTDATA["send_topic"]   = config.sendTopic;
+        MQTTDATA["receive_topic"]   = config.receiveTopic;
+        
+        Sbidon = "";
+        serializeJson(doc, Sbidon);
+        message += Sbidon;
+        message += fl;
+      }
+      else {
+        message += "Erreur format";
+        message += fl;
+      }
+      EnvoyerSms(number, slot);
+    }
+    else if (textesms.indexOf("MQTTSERVEUR") == 0) { // Serveur MQTT
+      // case sensitive
+      // MQTTSERVEUR=abcd.org
+      if (textesms.indexOf(char(61)) == 11) {
+        Sbidon = textesms.substring(12);
+        Serial.print("mqttserveur:"),Serial.print(Sbidon);
+        Serial.print(" ,"), Serial.println(Sbidon.length());
+        Sbidon.toCharArray(config.mqttServer, (Sbidon.length() + 1));
+        Write_Config();
+      }
+      message += F("MQTTserveur =");
+      message += String(config.mqttServer);
       message += F("\n au prochain demarrage");
       EnvoyerSms(number, slot);
     }
@@ -2218,6 +2255,12 @@ fin_tel:
       if (textesms.indexOf(char(61)) == 11) {
         int i = atoi(textesms.substring(12).c_str());
         if (i == 0  || i == 1){
+          if(i == 1 && config.messageMode == 0){ // activer GPRS
+            ConnectGPRS();
+          } else if(i == 0 && config.messageMode == 1) { // desactiver GPRS
+            mqttClient.disconnect();
+            modem.gprsDisconnect();
+          }
           config.messageMode = i;        
           Write_Config();														// sauvegarde en SPIFFS
         }
@@ -2400,7 +2443,8 @@ void EnvoyerSms(char *num, int sms) {
     if ((sms < 99 && config.messageMode) || sms == 255){ // MQTT
       // reponse MQTT
       Envoyer_MQTT();
-    } else if(sms != 99) { // SMS
+    } 
+    if(sms != 99) { // SMS
       if (!modem.sendSMS(num, message)) {
         Serial.print(F("Envoi SMS Failed:")), Serial.println(num);
       } else {
@@ -2465,57 +2509,86 @@ void MajHeure(String smsdate) {
       format date retourné par Fona "yy/MM/dd,hh:mm:ss±zz",
       +CCLK: "14/08/08,02:25:43-16" -16= décalage GMT en n*1/4heures(-4) */
     if (smsdate.length() > 1) { // si smsdate present mise a l'heure forcé
-    }
-    static bool First = true;
-    int ecart;
-    Serial.println(F("Mise a l'heure reguliere !, "));
-    int rep = modem.NTPServerSync("fr.pool.ntp.org", 4);
-    if(rep == 1){
-      String mytime = modem.getGSMDateTime(DATE_FULL);// "yy/MM/dd,hh:mm:ss±zz"
-      Serial.print("heurentp:"),Serial.println(mytime);
-      if(First){
-        //   setTime(hr, mn, sec, dy, mnth, yr);
-        setTime(mytime.substring(9,11).toInt(),
-                mytime.substring(12,14).toInt(),
-                mytime.substring(15,17).toInt(),
-                mytime.substring(6,8).toInt(),
-                mytime.substring(3,5).toInt(),
-                mytime.substring(0,2).toInt());
-        First = false;
-      } else {
-        //  calcul décalage entre H sys et H reseau en s
-        ecart  = (mytime.substring(9,11).toInt() - hour()) * 3600;
-        ecart += (mytime.substring(12,14).toInt() - minute()) * 60;
-        ecart += (mytime.substring(15,17).toInt()- second()) * 60;
-        Serial.print(F("Ecart s= ")), Serial.println(ecart);
-        if (abs(ecart) > 5) {
-          // ArretSonnerie();	// Arret Sonnerie propre
-          Alarm.disable(loopPrincipale);
-          Alarm.disable(DebutJour);
-          Alarm.disable(FinJour);
-          Alarm.disable(Auto_F);
+      // format: yy/MM/dd,hh:mm:ss±zz; zz: time zone, quarter of an hour
+      // setTime(hr, mn, sec, dy, mnth, yr);      
+      Serial.println(smsdate);
+      Alarm.disable(loopPrincipale);
+      Alarm.disable(DebutJour);
+      Alarm.disable(FinJour);
+      Alarm.disable(Auto_F);
 
-          setTime(mytime.substring(9,11).toInt(),
-                mytime.substring(12,14).toInt(),
-                mytime.substring(15,17).toInt(),
-                mytime.substring(6,8).toInt(),
-                mytime.substring(3,5).toInt(),
-                mytime.substring(0,2).toInt());
+      setTime(smsdate.substring(9,11).toInt(),
+            smsdate.substring(12,14).toInt(),
+            smsdate.substring(15,17).toInt(),
+            smsdate.substring(6,8).toInt(),
+            smsdate.substring(3,5).toInt(),
+            smsdate.substring(0,2).toInt());
 
-          Alarm.enable(loopPrincipale);
-          Alarm.enable(DebutJour);
-          Alarm.enable(FinJour);
-          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
-        }
-      }
+      Alarm.enable(loopPrincipale);
+      Alarm.enable(DebutJour);
+      Alarm.enable(FinJour);
+      if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
     } else {
-      static byte cpt = 0;
-      Serial.print("year:"),Serial.print(year());
-      Serial.print(", cpt:"),Serial.println(cpt);
-      while (year() < 2020 && First){ // repetition au demarrage si date erronée
-        Alarm.delay(1000);
-        if(cpt ++ > 3) break;
-        MajHeure("");
+      static bool First = true;
+      int ecart;
+      Serial.println(F("Mise a l'heure reguliere !, "));
+      int rep = modem.NTPServerSync("fr.pool.ntp.org", 4);
+      if(rep == 1){
+        String mytime = modem.getGSMDateTime(DATE_FULL);// "yy/MM/dd,hh:mm:ss±zz"
+        Serial.print("heurentp:"),Serial.println(mytime);
+        if(First){
+          //   setTime(hr, mn, sec, dy, mnth, yr);
+          setTime(mytime.substring(9,11).toInt(),
+                  mytime.substring(12,14).toInt(),
+                  mytime.substring(15,17).toInt(),
+                  mytime.substring(6,8).toInt(),
+                  mytime.substring(3,5).toInt(),
+                  mytime.substring(0,2).toInt());
+          First = false;
+        } else {
+          //  calcul décalage entre H sys et H reseau en s
+          ecart  = (mytime.substring(9,11).toInt() - hour()) * 3600;
+          ecart += (mytime.substring(12,14).toInt() - minute()) * 60;
+          ecart += (mytime.substring(15,17).toInt()- second()) * 60;
+          Serial.print(F("Ecart s= ")), Serial.println(ecart);
+          if (abs(ecart) > 5) {
+            // ArretSonnerie();	// Arret Sonnerie propre
+            Alarm.disable(loopPrincipale);
+            Alarm.disable(DebutJour);
+            Alarm.disable(FinJour);
+            Alarm.disable(Auto_F);
+
+            setTime(mytime.substring(9,11).toInt(),
+                  mytime.substring(12,14).toInt(),
+                  mytime.substring(15,17).toInt(),
+                  mytime.substring(6,8).toInt(),
+                  mytime.substring(3,5).toInt(),
+                  mytime.substring(0,2).toInt());
+
+            Alarm.enable(loopPrincipale);
+            Alarm.enable(DebutJour);
+            Alarm.enable(FinJour);
+            if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+          }
+        }
+      } else {
+        static byte cpt = 0;
+        Serial.print("year:"),Serial.print(year());
+        Serial.print(", cpt:"),Serial.println(cpt);
+        while (year() < 2020 && First){ // repetition au demarrage si date erronée
+          Alarm.delay(1000);
+          if(cpt ++ > 3){
+            Serial.println(F("Impossible de mettre à l'heure !"));
+            //on s'envoie à soi même un SMS "MAJHEURE"
+            message = F("MAJHEURE");
+            char numchar[13];
+            modem.readmyPhonebookEntry().number.toCharArray(numchar, 13);
+            MajLog("Auto", "envoie sms soi meme pour majheure");// renseigne log
+            EnvoyerSms(numchar, 1);
+            break;
+          }
+          MajHeure("");
+        }
       }
     }
   }
@@ -2570,6 +2643,10 @@ void SignalVie() {
   }
   envoieGroupeSMS(0, 0);
   action_wakeup_reason(4);
+  if(config.messageMode == 0){ // SMS only
+    mqttClient.disconnect();
+    modem.gprsDisconnect();
+  }
 }
 //---------------------------------------------------------------------------
 // void Write_Config() { // sauve configuration en EEPROM
@@ -3003,7 +3080,6 @@ void ConnexionWifi(char* ssid, char* pwd, char* number, int slot) {
       server.handleClient(); // Listen for client connections
       delay(1);
     }
-    // WifiOff();
   }
   WifiOff();
 }
@@ -3169,10 +3245,8 @@ void DebutSleep() {
 
   byte i = 0;
   if (gsm) {
-    //if(config.messageMode == 1){
       mqttClient.disconnect();
       modem.gprsDisconnect();
-    //}
     while (!modem.sleepEnable()) {
       Alarm.delay(100);
       if (i++ > 10) break;
@@ -3924,90 +3998,90 @@ byte gprs_upload_function (){
     // delay(1000);
   // }
   reply = 0;
-if (reply == 0){ // ouverture GPRS
-// reply = sendATcommand("AT+SAPBR=3,1,\"CONTYPE\",\"GPRS\"","OK","ERROR", 1000);
-if (reply == 0){
-// reply = sendATcommand("AT+SAPBR=3,1,\"APN\",\"sl2sfr\"", "OK", "ERROR", 1000);//Replace with your APN
-if (reply == 0){
-//reply = sendATcommand("AT+SAPBR=3,1,\"USER\",\"entelpcs\"", "OK", "ERROR", 1000);
-if (reply == 0){
-//reply = sendATcommand("AT+SAPBR=3,1,\"PWD\",\"entelpcs\"", "OK", "ERROR", 1000);
-if (reply == 0){
-reply = 2;
-i = 0;
-while (i < 3 && reply == 2){ //Try 3 times...
-  reply = sendATcommand("AT+SAPBR=1,1", "OK", "ERROR", 10000);
-  if (reply == 2){
-    sendATcommand("AT+SAPBR=0,1", "OK", "ERROR", 10000);
-  }
-  i++;
-}
-if (reply == 0){
-reply = sendATcommand("AT+SAPBR=2,1", "OK", "ERROR", 1000);
-if (reply == 0){
-reply = sendATcommand("AT+FTPCID=1", "OK", "ERROR", 1000);
-if (reply == 0){
-reply = sendATcommand("AT+FTPSERV=\"" + String(config.ftpServeur) + "\"", "OK", "ERROR", 1000);//replace ftp.sample.com with your server address
-if (reply == 0){
-reply = sendATcommand("AT+FTPPORT="+ String(config.ftpPort), "OK", "ERROR", 1000);
-if (reply == 0){
-reply = sendATcommand("AT+FTPUN=\"" + String(config.ftpUser) + "\"", "OK", "ERROR", 1000);//Replace 1234@sample.com with your username
-if (reply == 0){
-reply = sendATcommand("AT+FTPPW=\"" + String(config.ftpPass) + "\"", "OK", "ERROR", 1000);//Replace 12345 with your password
-if (reply == 0){
-reply = sendATcommand("AT+FTPPUTNAME=\"" + String(filelog) + "\"", "OK", "ERROR", 1000);
-if (reply == 0){
-  reply = sendATcommand("AT+FTPPUTPATH=\"/" + String(config.Idchar) + "/\"", "OK", "ERROR", 1000);// repertoire "/Id/"
-if (reply == 0){
-  unsigned int ptime = millis();
-  reply = sendATcommand("AT+FTPPUT=1", "+FTPPUT: 1,1", "+FTPPUT: 1,6", 60000);
-  Serial.println("Time: " + String(millis() - ptime));
+  if (reply == 0){ // ouverture GPRS
+  // reply = sendATcommand("AT+SAPBR=3,1,\"CONTYPE\",\"GPRS\"","OK","ERROR", 1000);
   if (reply == 0){
-    if (UploadFile) {
-      int i = 0;
-      unsigned int ptime = millis();
-      long archivosize = UploadFile.size();
-      while (UploadFile.available()) {
-        while(archivosize >= buffer_space){
-          reply = sendATcommand("AT+FTPPUT=2," + String(buffer_space), "+FTPPUT: 2,1", "OK", 3000);
-            if (reply == 0) { //This loop checks for positive reply to upload bytes and in case or error it retries to upload
-              Serial.println("Remaining Characters: " + String(UploadFile.available()));
-              for(int d = 0; d < buffer_space; d++){
-                Serial2.write(UploadFile.read());
-                archivosize -= 1;
+  // reply = sendATcommand("AT+SAPBR=3,1,\"APN\",\"sl2sfr\"", "OK", "ERROR", 1000);//Replace with your APN
+  if (reply == 0){
+  //reply = sendATcommand("AT+SAPBR=3,1,\"USER\",\"entelpcs\"", "OK", "ERROR", 1000);
+  if (reply == 0){
+  //reply = sendATcommand("AT+SAPBR=3,1,\"PWD\",\"entelpcs\"", "OK", "ERROR", 1000);
+  if (reply == 0){
+  reply = 2;
+  i = 0;
+  while (i < 3 && reply == 2){ //Try 3 times...
+    reply = sendATcommand("AT+SAPBR=1,1", "OK", "ERROR", 10000);
+    if (reply == 2){
+      sendATcommand("AT+SAPBR=0,1", "OK", "ERROR", 10000);
+    }
+    i++;
+  }
+  if (reply == 0){
+  reply = sendATcommand("AT+SAPBR=2,1", "OK", "ERROR", 1000);
+  if (reply == 0){
+  reply = sendATcommand("AT+FTPCID=1", "OK", "ERROR", 1000);
+  if (reply == 0){
+  reply = sendATcommand("AT+FTPSERV=\"" + String(config.ftpServeur) + "\"", "OK", "ERROR", 1000);//replace ftp.sample.com with your server address
+  if (reply == 0){
+  reply = sendATcommand("AT+FTPPORT="+ String(config.ftpPort), "OK", "ERROR", 1000);
+  if (reply == 0){
+  reply = sendATcommand("AT+FTPUN=\"" + String(config.ftpUser) + "\"", "OK", "ERROR", 1000);//Replace 1234@sample.com with your username
+  if (reply == 0){
+  reply = sendATcommand("AT+FTPPW=\"" + String(config.ftpPass) + "\"", "OK", "ERROR", 1000);//Replace 12345 with your password
+  if (reply == 0){
+  reply = sendATcommand("AT+FTPPUTNAME=\"" + String(filelog) + "\"", "OK", "ERROR", 1000);
+  if (reply == 0){
+    reply = sendATcommand("AT+FTPPUTPATH=\"/" + String(config.Idchar) + "/\"", "OK", "ERROR", 1000);// repertoire "/Id/"
+  if (reply == 0){
+    unsigned int ptime = millis();
+    reply = sendATcommand("AT+FTPPUT=1", "+FTPPUT: 1,1", "+FTPPUT: 1,6", 60000);
+    Serial.println("Time: " + String(millis() - ptime));
+    if (reply == 0){
+      if (UploadFile) {
+        int i = 0;
+        unsigned int ptime = millis();
+        long archivosize = UploadFile.size();
+        while (UploadFile.available()) {
+          while(archivosize >= buffer_space){
+            reply = sendATcommand("AT+FTPPUT=2," + String(buffer_space), "+FTPPUT: 2,1", "OK", 3000);
+              if (reply == 0) { //This loop checks for positive reply to upload bytes and in case or error it retries to upload
+                Serial.println("Remaining Characters: " + String(UploadFile.available()));
+                for(int d = 0; d < buffer_space; d++){
+                  Serial1.write(UploadFile.read());
+                  archivosize -= 1;
+                }
               }
+              else {
+                Serial.println("Error while sending data:");
+                reply = 1;
+              }
+          }
+          if (sendATcommand("AT+FTPPUT=2," + String(archivosize), "+FTPPUT: 2," + String(archivosize), "ERROR", 10000) == 0) {
+            for(int t = 0; t < archivosize; t++){
+              Serial1.write(UploadFile.read());
             }
-            else {
-              Serial.println("Error while sending data:");
-              reply = 1;
-            }
-        }
-        if (sendATcommand("AT+FTPPUT=2," + String(archivosize), "+FTPPUT: 2," + String(archivosize), "ERROR", 10000) == 0) {
-          for(int t = 0; t < archivosize; t++){
-            Serial2.write(UploadFile.read());
           }
         }
+      UploadFile.close();
+      Serial.println("Time: " + String(millis() - ptime));
       }
-    UploadFile.close();
-    Serial.println("Time: " + String(millis() - ptime));
     }
   }
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
   sendATcommand("AT+SAPBR=0,1", "OK", "ERROR", 10000); // fermeture GPRS
-return reply;
+  return reply;
 }
 //---------------------------------------------------------------------------
 byte sendATcommand(String ATcommand, String answer1, String answer2, unsigned int timeout){
@@ -4016,15 +4090,15 @@ byte sendATcommand(String ATcommand, String answer1, String answer2, unsigned in
   char character;
 
   //Clean the modem input buffer
-  while(Serial2.available()>0) Serial2.read();
+  while(Serial1.available()>0) Serial1.read();
 
   //Send the atcommand to the modem
-  Serial2.println(ATcommand);
+  Serial1.println(ATcommand);
   delay(100);
   unsigned int timeprevious = millis();
   while((reply == 1) && ((millis() - timeprevious) < timeout)){
-    while(Serial2.available()>0) {
-      character = Serial2.read();
+    while(Serial1.available()>0) {
+      character = Serial1.read();
       content.concat(character);
       Serial.print(character);
       delay(10);
