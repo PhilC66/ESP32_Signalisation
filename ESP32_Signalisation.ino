@@ -95,7 +95,7 @@
 #include <WiFi.h>
 #include <SPIFFS.h>
 #include <ArduinoOTA.h>
-#include <WiFiClient.h>
+// #include <WiFiClient.h>
 #include <WebServer.h>
 #include <FS.h>
 #include <SPI.h>
@@ -114,6 +114,7 @@ bool    SPIFFS_present = false;
 
 #define TINY_GSM_RX_BUFFER 1030   //update
 #define TINY_GSM_MODEM_SIM800
+// #define TINY_GSM_USE_WIFI false
 #define Serial Serial
 #define SerialAT Serial1
 #define TINY_GSM_DEBUG Serial
@@ -533,13 +534,15 @@ void loop() {
   if (rebond2 > millis()) rebond2 = millis();
   static unsigned int t0 = millis();
   bool first = true;
-  if (!mqttClient.connected() && ((millis()- t0) > 5000 || first)){
-// ***** prevoir un timeout si pb ***************************************************************
-      mqttConnect(); // Connect if MQTT client is not connected.
-      t0 = millis();
-      first = false;
-    }
-  mqttClient.loop(); // Call the loop to maintain connection to the server.
+  if(gsm){
+    if (!mqttClient.connected() && ((millis()- t0) > 5000 || first)){
+  // ***** prevoir un timeout si pb ***************************************************************
+        mqttConnect(); // Connect if MQTT client is not connected.
+        t0 = millis();
+        first = false;
+      }
+    mqttClient.loop(); // Call the loop to maintain connection to the server.
+  }
 
 //*************** Verification position taquet ***************
   VerifTaquet_1(); // si Cv65 Taquet Vp
@@ -1004,7 +1007,12 @@ void traite_sms(byte slot) {
       byte pos1 = textesms.indexOf(char(44));//","
       byte pos2 = textesms.indexOf(char(44), pos1 + 1);
       String ssids = textesms.substring(pos1 + 1, pos2);
-      String pwds  = textesms.substring(pos2 + 1, textesms.length());
+      String pwds  = "";
+      if(textesms.indexOf(char(13)) > -1){
+        pwds = textesms.substring(pos2 + 1, textesms.length()-1); // elimine dernier \n si existe
+      } else {
+        pwds = textesms.substring(pos2 + 1, textesms.length());
+      }
       char ssid[20];
       char pwd[20];
       ssids.toCharArray(ssid, ssids.length() + 1);
@@ -2995,8 +3003,9 @@ void ConnexionWifi(char* ssid, char* pwd, char* number, int slot) {
       server.handleClient(); // Listen for client connections
       delay(1);
     }
-    WifiOff();
+    // WifiOff();
   }
+  WifiOff();
 }
 //---------------------------------------------------------------------------
 void WifiOff() {
