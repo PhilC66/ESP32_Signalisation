@@ -1077,7 +1077,7 @@ fin_tel:
         EnvoyerSms(number, slot);
       }
     }
-    else if (gsm && (textesms == F("LST?") || textesms == F("LST1"))) {	//	Liste des Num Tel
+    else if (gsm && (textesms.indexOf(F("LST?")) == 0 || textesms.indexOf(F("LST1")) == 0)) {	//	Liste des Num Tel
       for (int idx = 1; idx < 10; idx ++) {
         if(modem.readPhonebookEntry(idx).number.length() > 0){
         message += String(idx) + ":";
@@ -1483,7 +1483,7 @@ fin_tel:
       message += fl;
       EnvoyerSms(number, slot);
     }
-    else if (textesms == F("CIRCULE")) {
+    else if (textesms.indexOf(F("CIRCULE")) == 0) {
       bool ok = false;
       /* demande passer en mode Circulé pour le jour courant,
         sans modification calendrier enregistré en SPIFFS */
@@ -1504,7 +1504,7 @@ fin_tel:
         // action_wakeup_reason(4);
       }
     }
-    else if (textesms == F("NONCIRCULE")) {
+    else if (textesms.indexOf(F("NONCIRCULE")) == 0) {
       bool ok = false;
       /* demande passer en mode nonCirculé pour le jour courant,
         sans modification calendrier enregistré en SPIFFS 
@@ -1579,7 +1579,7 @@ fin_tel:
       }
       EnvoyerSms(number, slot);
     }
-    else if (textesms == F("RST")) {               // demande RESET
+    else if (textesms.indexOf(F("RST")) == 0) {               // demande RESET
       message += F("Le systeme va etre relance");  // apres envoie du SMS!
       message += fl;
       FlagReset = true;                            // reset prochaine boucle
@@ -2244,7 +2244,7 @@ fin_tel:
       }
       EnvoyerSms(number, slot);
     }
-    else if (textesms == "RSTALACDEFBLC") {
+    else if (textesms.indexOf("RSTALACDEFBLC") == 0) {
       // demande reset Alarme Cde Feu Blanc
       EffaceAlaCdeFBlc();
       message += "Reset Alarme en cours";
@@ -3087,8 +3087,7 @@ void ConnexionWifi(char* ssid, char* pwd, char* number, int slot) {
 void WifiOff() {
   Serial.println(F("Wifi off"));
   WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  WiFi.mode(WIFI_MODE_NULL);
+  WiFi.mode(WIFI_MODE_NULL); // equiv WIFI_OFF
   btStop();
   Alarm.delay(100);
   ResetHard();
@@ -3096,8 +3095,12 @@ void WifiOff() {
 //---------------------------------------------------------------------------
 void ResetHard() {
   // GPIO13 to RS reset hard
+  Serial.println("reset hard");
+  delay(500);
   pinMode(PinReset, OUTPUT);
+  delay(100);
   digitalWrite(PinReset, LOW);
+  Serial.println("echec reset hard"); // on ne doit jamais voir cette ligne!
 }
 
 //---------------------------------------------------------------------------
@@ -3634,25 +3637,65 @@ void HomePage() {
   webpage += F("<td>");	webpage += String(config.gprsPass);	webpage += F("</td>");
   webpage += F("</tr>");
 
-  // webpage += F("<tr>");
-  // webpage += F("<td>ftp Serveur</td>");
-  // webpage += F("<td>");	webpage += String(config.ftpServeur);	webpage += F("</td>");
-  // webpage += F("</tr>");
+  webpage += F("<tr>");
+  webpage += F("<td>ftp Serveur</td>");
+  webpage += F("<td>");	webpage += String(config.ftpServeur);	webpage += F("</td>");
+  webpage += F("</tr>");
 
-  // webpage += F("<tr>");
-  // webpage += F("<td>ftp Port</td>");
-  // webpage += F("<td>");	webpage += String(config.ftpPort);	webpage += F("</td>");
-  // webpage += F("</tr>");
+  webpage += F("<tr>");
+  webpage += F("<td>ftp Port</td>");
+  webpage += F("<td>");	webpage += String(config.ftpPort);	webpage += F("</td>");
+  webpage += F("</tr>");
 
-  // webpage += F("<tr>");
-  // webpage += F("<td>ftp User</td>");
-  // webpage += F("<td>");	webpage += String(config.ftpUser);	webpage += F("</td>");
-  // webpage += F("</tr>");
+  webpage += F("<tr>");
+  webpage += F("<td>ftp User</td>");
+  webpage += F("<td>");	webpage += String(config.ftpUser);	webpage += F("</td>");
+  webpage += F("</tr>");
 
-  // webpage += F("<tr>");
-  // webpage += F("<td>ftp Pass</td>");
-  // webpage += F("<td>");	webpage += String(config.ftpPass);	webpage += F("</td>");
-  // webpage += F("</tr>");
+  webpage += F("<tr>");
+  webpage += F("<td>ftp Pass</td>");
+  webpage += F("<td>");	webpage += String(config.ftpPass);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>MQTT Serveur</td>");
+  webpage += F("<td>");	webpage += String(config.mqttServer);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>MQTT Port</td>");
+  webpage += F("<td>");	webpage += String(config.mqttPort);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>MQTT User</td>");
+  webpage += F("<td>");	webpage += String(config.mqttUserName);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>MQTT Pass</td>");
+  webpage += F("<td>");	webpage += String(config.mqttPass);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>MQTT permanent Topic</td>");
+  webpage += F("<td>");	webpage += String(config.permanentTopic);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>MQTT send Topic</td>");
+  webpage += F("<td>");	webpage += String(config.sendTopic);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>MQTT receive Topic</td>");
+  webpage += F("<td>");	webpage += String(config.receiveTopic);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>Message Mode 0=SMS,1=SMS+MQTT</td>");
+  webpage += F("<td>");	webpage += String(config.messageMode);	webpage += F("</td>");
+  webpage += F("</tr>");
 
   webpage += F("</table><br>");
 
@@ -4388,7 +4431,11 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
     if(Sbidon.length() > 0){
       //renvoyer "" sur permanentTopic pour eviter repetition
       char rep[2] = "";
-      mqttClient.publish(config.permanentTopic, rep);
+      if(mqttClient.publish(config.permanentTopic, rep, true)){
+        Serial.println("efface permanent topic OK");
+      } else {
+        Serial.println("efface permanent topic KO");
+      }
       traite_sms(255);
     }
   }
