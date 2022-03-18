@@ -72,10 +72,11 @@
   1- remplacement biblio GSM
   2- suppression EEPROM, config sauvgardé en SPIFFS
   3- suppression MQTTDATA en sms
+  4- suppression log en EEPROM(pas utilisé)
 
 
-  Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
-  Arduino IDE 1.8.16 : 1020750 77%, 48032 14% sur PC
+  Compilation LOLIN D32,default,80MHz, ESP32 1.0.6
+  Arduino IDE 1.8.16 : 1068874 81%, 49152 15% sur PC
   Arduino IDE 1.8.16 :  77%,  14% sur raspi
 
 
@@ -194,6 +195,10 @@ bool FlagLastTqt_2           = false; // memo last etat
 bool FlagReset = false;       // Reset demandé
 bool jour      = false;				// jour = true, nuit = false
 bool gsm       = true;        // carte GSM presente utilisé pour test sans GSM seulement
+bool FlagAlarmeGprs          = false;
+bool FlagAlarmeMQTT          = false;
+bool FlagLastAlarmeGprs      = false;
+bool FlagLastAlarmeMQTT      = false;
 
 String Memo_Demande_Feux[3]="";  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4,V7)
 bool FlagDemande_Feux = false;   // si demande encours = true
@@ -292,9 +297,7 @@ void IRAM_ATTR handleInterruptIp2() { // Entrée 2
 //---------------------------------------------------------------------------
 
 void setup() {
-// pour test
-tempServer   = "philippeco.hopto.org";//exploitation.tpcf.fr
-// pour test
+
   message.reserve(140);
 
   Serial.begin(115200);
@@ -377,7 +380,7 @@ tempServer   = "philippeco.hopto.org";//exploitation.tpcf.fr
       config.Pos_Pn_PB[i] = 0;
     }
     strncpy(config.Idchar,"TPCF_CV65",sizeof(config.Idchar));
-    strncpy(config.apn,"sl2sfr",sizeof(config.apn)); // "free"
+    strncpy(config.apn,"free",sizeof(config.apn)); // "sl2sfr" "free"
     strncpy(config.gprsUser,"",sizeof(config.gprsUser));
     strncpy(config.gprsPass,"",sizeof(config.gprsPass));    
     tempServer.toCharArray(config.ftpServeur,(tempServer.length() + 1));
@@ -422,8 +425,8 @@ tempServer   = "philippeco.hopto.org";//exploitation.tpcf.fr
   })
   .onEnd([]() {
     Serial.println("End");
-    delay(100);
-    ResetHard();
+    // delay(100);
+    // ResetHard();
   })
   .onProgress([](unsigned int progress, unsigned int total) {
     Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
@@ -524,14 +527,16 @@ void loop() {
   bool first = true;
   if(gsm && config.messageMode == 1){
     if (!mqttClient.connected() && ((millis()- t0) > 5000 || first)){
-  // ***** prevoir un timeout si pb ***************************************************************
-        mqttConnect(); // Connect if MQTT client is not connected.
-        t0 = millis();
-        first = false;
+      mqttConnect(); // Connect if MQTT client is not connected.
+      t0 = millis();
+      first = false;
+      if((millis()- t0) > 60000){ // timeout
+        goto finmqttinit;
       }
+    }
     mqttClient.loop(); // Call the loop to maintain connection to the server.
   }
-
+  finmqttinit:
 //*************** Verification position taquet ***************
   VerifTaquet_1(); // si Cv65 Taquet Vp
   VerifTaquet_2(); // si Cv65 Taquet V3
@@ -702,6 +707,38 @@ void Acquisition() {
     FlagReset = false;
     ResetHard();				//	reset hard
   }
+  
+  if (gsm && config.messageMode == 1){
+    static byte nalaGprs = 0;
+    if (!modem.isGprsConnected()) {
+      modem.gprsConnect(config.apn, config.gprsUser, config.gprsPass);
+      if (nalaGprs ++ == 10) {
+        FlagAlarmeGprs = true;
+        nalaGprs = 0;
+      }
+    } else {
+      if (nalaGprs > 0){
+        nalaGprs --;
+        FlagAlarmeGprs = false;
+      }
+    }
+    static byte nalaMQTT = 0;
+    if (!mqttClient.connected()) {
+      if (nalaMQTT ++ == 10) {
+        FlagAlarmeMQTT = true;
+        nalaMQTT = 0;
+      }
+    } else {
+      if (nalaMQTT > 0){
+        nalaMQTT --;
+        FlagAlarmeMQTT = false;
+      }
+    }
+  } else{
+    FlagAlarmeGprs = false;
+    FlagAlarmeMQTT = false;
+  }
+
   envoie_alarme();
 
   digitalWrite(LED_PIN, 0);
@@ -2303,6 +2340,14 @@ void envoie_alarme() {
     MajLog(F("Auto"), F("AlarmeTension"));
     FlagLastAlarmeTension = FlagAlarmeTension;
   }
+  if (FlagAlarmeGprs != FlagLastAlarmeGprs) {
+    SendEtat = true;
+    FlagLastAlarmeGprs = FlagAlarmeGprs;
+  }
+  if (FlagAlarmeMQTT != FlagLastAlarmeMQTT) {
+    SendEtat = true;
+    FlagLastAlarmeMQTT = FlagAlarmeMQTT;
+  }
   if (FlagAlarmeCdeFBlc != FlagLastAlarmeCdeFBlc) {
     SendEtat = true;
     MajLog(F("Auto"), "Alarme Cde FBlc");
@@ -2351,7 +2396,8 @@ void generationMessage() {
   // n = 0 message normal
   // n = 1 message fin analyse
   messageId();
-  if (FlagAlarmeTension || FlagLastAlarmeTension || FlagAlarme24V || FlagAlarmeCdeFBlc) {
+  if (FlagAlarmeTension || FlagLastAlarmeTension || FlagAlarme24V || FlagAlarmeCdeFBlc
+  || FlagAlarmeGprs || FlagAlarmeMQTT) {
     message += F("--KO--------KO--");
   }
   else {
@@ -2414,6 +2460,19 @@ void generationMessage() {
   if (FlagAlarme24V) {
     message += F("Alarme 24V = ");
     message += String(float(Tension24 / 100.0)) + "V" + fl;
+  }
+  if (gsm && config.messageMode == 1){
+    if (!FlagAlarmeGprs) {
+      // message += "GPRS OK" + fl; // Affichage seulement si defaut
+    } else {
+      message += "GPRS KO" + fl;
+    }
+
+    if (!FlagAlarmeMQTT) {
+      // message += "MQQT OK" + fl; // Affichage seulement si defaut
+    } else {
+      message += "MQTT KO" + fl;
+    }
   }
   // if (Allume) {
   // for (int i = 0; i < 5 ; i++) {
@@ -2698,10 +2757,10 @@ void logRecord(String nom, String action) { // renseigne log et enregistre EEPRO
   }
 }
 //---------------------------------------------------------------------------
-void listDir(fs::FS &fs, const char * dirname, byte levels) {
+void listDir(const char * dirname, byte levels) {
   Serial.printf("Listing directory: %s\r\n", dirname);
 
-  File root = fs.open(dirname);
+  File root = SPIFFS.open(dirname);
   if (!root) {
     Serial.println(F("- failed to open directory"));
     return;
@@ -2717,7 +2776,7 @@ void listDir(fs::FS &fs, const char * dirname, byte levels) {
       Serial.print(F("  DIR : "));
       Serial.println(file.name());
       if (levels) {
-        listDir(fs, file.name(), levels - 1);
+        listDir(file.name(), levels - 1);
       }
     } else {
       Serial.print(F("  FILE: "));
@@ -2730,10 +2789,10 @@ void listDir(fs::FS &fs, const char * dirname, byte levels) {
   file.close();
 }
 //---------------------------------------------------------------------------
-void readFile(fs::FS &fs, const char * path) {
+void readFile(const char * path) {
   Serial.printf("Reading file: %s\r\n", path);
 
-  File file = fs.open(path);
+  File file = SPIFFS.open(path);
   if (!file || file.isDirectory()) {
     Serial.println(F("- failed to open file for reading"));
     return;
@@ -2757,10 +2816,10 @@ void readFile(fs::FS &fs, const char * path) {
   }
 }
 //---------------------------------------------------------------------------
-void appendFile(fs::FS &fs, const char * path, const char * message) {
+void appendFile(const char * path, const char * message) {
   // Serial.printf("Appending to file: %s\r\n", path);
 
-  File file = fs.open(path, FILE_APPEND);
+  File file = SPIFFS.open(path, FILE_APPEND);
   if (!file) {
     // Serial.println("- failed to open file for appending");
     return;
@@ -2815,14 +2874,14 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
     strcat(Cbidon, Id.c_str());
     strcat(Cbidon, Raison.c_str());
     Serial.println(Cbidon);
-    appendFile(SPIFFS, filelog, Cbidon);
+    appendFile(filelog, Cbidon);
   }
   else{
     char Cbidon[101]; // 100 char maxi
     sprintf(Cbidon, "%02d/%02d/%4d %02d:%02d:%02d;", day(), month(), year(), hour(), minute(), second());
     strcat(Cbidon,config.Idchar);
     strcat(Cbidon,fl.c_str());
-    appendFile(SPIFFS, filelog, Cbidon);
+    appendFile(filelog, Cbidon);
     Serial.print("nouveau fichier log:"),Serial.println(Cbidon);
   }
 }
@@ -2840,7 +2899,7 @@ void EnregistreCalendrier() { // remplace le calendrier
     Serial.println(Sbidon);
     Sbidon += fl;
     Sbidon.toCharArray(bid, 63);
-    appendFile(SPIFFS, filecalendrier, bid);
+    appendFile(filecalendrier, bid);
     Sbidon = "";
   }
 }
@@ -2850,7 +2909,7 @@ void EnregistreLumLUT() {
   char bid[9];
   for (int i = 0; i < 11; i++) {
     sprintf(bid, "%d,%d\n", TableLum[i][0], TableLum[i][1]);
-    appendFile(SPIFFS, filelumlut, bid);
+    appendFile(filelumlut, bid);
   }
 }
 //---------------------------------------------------------------------------
@@ -2879,7 +2938,7 @@ void OuvrirLumLUT() {
         v2 = 10;
       }
       sprintf(bid, "%d,%d\n", v1, v2);
-      appendFile(SPIFFS, filelumlut, bid);
+      appendFile(filelumlut, bid);
       TableLum[i][0] = v1;
       TableLum[i][1] = v2;
     }
@@ -2903,7 +2962,7 @@ int lumlut(int l) {
 void OuvrirCalendrier() {
 
   // this opens the file "f.txt" in read-mode
-  listDir(SPIFFS, "/", 0);
+  listDir("/", 0);
   bool f = SPIFFS.exists(filecalendrier);
   // Serial.println(f);
   File f0 = SPIFFS.open(filecalendrier, "r");
@@ -2924,11 +2983,11 @@ void OuvrirCalendrier() {
       Serial.println(Sbidon);
       Sbidon += fl;
       Sbidon.toCharArray(bid, 63);
-      appendFile(SPIFFS, filecalendrier, bid);
+      appendFile(filecalendrier, bid);
       Sbidon = "";
     }
   }
-  readFile(SPIFFS, filecalendrier);
+  readFile(filecalendrier);
 
   for (int m = 1; m < 13; m++) {
     for (int j = 1; j < 32; j++) {
@@ -2936,8 +2995,6 @@ void OuvrirCalendrier() {
     }
     Serial.println();
   }
-  listDir(SPIFFS, "/", 0);
-
 }
 //---------------------------------------------------------------------------
 void FinJournee() {

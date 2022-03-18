@@ -4,9 +4,10 @@
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/**",
-                "C:\\\\Users\\\\phili\\\\AppData\\\\Local\\\\Arduino15\\\\packages\\\\esp32\\\\tools\\\\**",
-                "C:\\\\Users\\\\phili\\\\AppData\\\\Local\\\\Arduino15\\\\packages\\\\esp32\\\\hardware\\\\esp32\\\\1.0.2\\\\**",
-                "F:\\\\Documents\\\\Arduino\\\\libraries\\\\**"
+                "C:\\Users\\phili\\AppData\\Local\\Arduino15\\**",
+                // "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\tools\\**",
+                // "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\1.0.6\\**",
+                "F:\\Documents\\Arduino\\libraries\\**"
             ],
             "defines": [
                 "_DEBUG",
