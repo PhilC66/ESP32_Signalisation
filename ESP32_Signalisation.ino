@@ -69,14 +69,23 @@
   jour non circule continue sans sleep voir log 26/10
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
+  V2-16 15/07/2022 installé Cv65(spare ex Cv55)
+  1- Verif Feu blanc que
+   si Allume
+  2- Comande vide log par SMS
+
+  Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
+  Arduino IDE 1.8.19 : 1017302 77%, 47928 14% sur PC
+  Arduino IDE 1.8.*  : * 77%, 47928 14% sur raspi
+
   V2-15 11/01/2022 installé Cv65,66,45,46,55,56 tous VH2.2
   1- Ajout gestion Entre2 Taquet 2, code ajouter F ou O apres code d'origine
   2- Correction bug si Jour NonCircule ouverture taquet1 affichage incorrect
     pas de gestion taquet si NonCircule
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
-  Arduino IDE 1.8.16 : 1017202 77%, 47928 14% sur PC
-  Arduino IDE 1.8.16 : 1017178 77%, 47928 14% sur raspi
+  Arduino IDE 1.8.19 : 1017202 77%, 47928 14% sur PC
+  Arduino IDE 1.8.*  : * 77%, 47928 14% sur raspi
 
   V2-14 30/08/2021 installé CV35,46,45,56,55,66,65
 
@@ -119,7 +128,10 @@
   installation Cv65 V1-4
 
 */
-String ver        = "V2-15";
+
+#include <Arduino.h>
+
+String ver        = "V2-16";
 int    Magique    = 13;
 
 #include <Battpct.h>
@@ -545,7 +557,7 @@ void loop() {
   VerifTaquet_1(); // si Cv65 Taquet Vp
   VerifTaquet_2(); // si Cv65 Taquet V3
 //*************** Verification commande Feu Blanc ***************
-  VerifCdeFBlc();
+  if (Allume) VerifCdeFBlc();
 
   ArduinoOTA.handle();
   Alarm.delay(0);
@@ -2194,6 +2206,12 @@ fin_i:
         // demande reset Alarme Cde Feu Blanc
         EffaceAlaCdeFBlc();
         message += "Reset Alarme en cours";
+        EnvoyerSms(number, sms);
+      }
+      else if (textesms == "VIDELOG"){
+        SPIFFS.remove(filelog);
+        FileLogOnce = false;
+        message += "Effacement fichier log";
         EnvoyerSms(number, sms);
       }
       //**************************************
