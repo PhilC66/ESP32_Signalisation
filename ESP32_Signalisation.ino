@@ -66,17 +66,22 @@
 
 
 	to do
+  si date 1970 mettre date 01/08/2022 08:00:00, comme Cv35
+  
   jour non circule continue sans sleep voir log 26/10
   corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
 
-  V2-16 15/07/2022 installé Cv65(spare ex Cv55)
-  1- Verif Feu blanc que
-   si Allume
+  V2-16 15/07/2022 installé Cv65(spare ex Cv55) item 1 et 2 seulement
+  1- Verif Feu blanc que si Allume
   2- Comande vide log par SMS
+  3- Print __FILE__ au démarrage
+  4- Supprimer envoie SMS soimeme si pb majheure,
+    remplacé par majheure par defaut 01/08/2022 08:00:00
+  5- Ajouter Commande AT par SMS: SENDAT=cdeAT
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
-  Arduino IDE 1.8.19 : 1017302 77%, 47928 14% sur PC
-  Arduino IDE 1.8.*  : * 77%, 47928 14% sur raspi
+  Arduino IDE 1.8.19 : 1018062 77%, 47928 14% sur PC
+  Arduino IDE 1.8.16 : 1018010 77%, 47928 14% sur raspi
 
   V2-15 11/01/2022 installé Cv65,66,45,46,55,56 tous VH2.2
   1- Ajout gestion Entre2 Taquet 2, code ajouter F ou O apres code d'origine
@@ -337,6 +342,7 @@ void setup() {
 
   Serial.begin(115200);
   Serial.println();
+  Serial.println(__FILE__);
 
   pinMode(PinIp1     , INPUT_PULLUP);
   pinMode(PinIp2     , INPUT_PULLUP);
@@ -2214,6 +2220,17 @@ fin_i:
         message += "Effacement fichier log";
         EnvoyerSms(number, sms);
       }
+      else if (textesms.indexOf(F("SENDAT")) == 0){
+        // envoie commande AT au SIM800
+        // attention DANGEREUX pas de verification!
+        if (textesms.indexOf(char(61)) == 6) {
+          String CdeAT = textesms.substring(7, textesms.length());
+          String reply = sendAT(CdeAT,"OK","ERROR",1000);
+          // Serial.print("reponse: "),Serial.println(reply);
+          message += String(reply);          
+          EnvoyerSms(number, sms);
+        }
+      }
       //**************************************
       else {
         message += F("message non reconnu !");
@@ -2423,6 +2440,7 @@ void MajHeure(String smsdate) {
       +CCLK: "14/08/08,02:25:43-16" -16= décalage GMT en n*1/4heures(-4) */
     if (smsdate.length() > 1) { // si smsdate present mise a l'heure forcé
       Sim800.SetTime(smsdate);
+      Serial.print("Heure du SMS: "),Serial.println(smsdate);
     }
     static bool First = true;
     int ecart;
@@ -2447,13 +2465,22 @@ void MajHeure(String smsdate) {
         // }
         if (millis() - debut > 15000) {
           Serial.println(F("Impossible de mettre à l'heure !"));
-          //on s'envoie à soi même un SMS "MAJHEURE"
-          message = F("MAJHEURE");
-          char numchar[13];
-          String numstring = Sim800.getNumTel();
-          numstring.toCharArray(numchar, 13);
-          MajLog("Auto", "envoie sms soi meme pour majheure");// renseigne log
-          EnvoyerSms(numchar, true);
+          //on s'envoie à soi même un SMS "MAJHEURE" supprimé V2-16
+          // message = F("MAJHEURE");
+          // char numchar[13];
+          // String numstring = Sim800.getNumTel();
+          // numstring.toCharArray(numchar, 13);
+          // MajLog("Auto", "envoie sms soi meme pour majheure");// renseigne log
+          // EnvoyerSms(numchar, true);
+
+          // Mise à l'heure par défaut V2-16
+          Sim800.SetTime("22/08/01,08:00:00+08"); // 01/08 jour toujours circule
+          Nyear   = 22;
+          Nmonth  = 8;
+          Nday    = 1;
+          Nhour   = 8;
+          Nminute = 0;
+          Nsecond = 0;
           break;
         }
       }
@@ -4033,6 +4060,31 @@ byte sendATcommand(String ATcommand, String answer1, String answer2, unsigned in
     }
   }
   return reply;
+}
+//---------------------------------------------------------------------------
+String sendAT(String ATcommand, String answer1, String answer2, unsigned int timeout){
+  byte reply = 1;
+  String content = "";
+  char character;
+
+  //Clean the modem input buffer
+  while(Serial2.available()>0) Serial2.read();
+
+  //Send the atcommand to the modem
+  Serial2.println(ATcommand);
+  delay(100);
+  unsigned int timeprevious = millis();
+  while((reply == 1) && ((millis() - timeprevious) < timeout)){
+    while(Serial2.available()>0) {
+      character = Serial2.read();
+      content.concat(character);
+      Serial.print(character);
+      delay(10);
+    }
+  }
+  // Serial.print("reponse: "),Serial.println(content);
+  // Serial.println("fin reponse");
+  return content;
 }
 //---------------------------------------------------------------------------
 void VerifCdeFBlc(){
