@@ -66,10 +66,16 @@
 
 
 	to do
-  si date 1970 mettre date 01/08/2022 08:00:00, comme Cv35
   
-  jour non circule continue sans sleep voir log 26/10
-  corrigé a verifier, apres KO tensions pas de retour OK 26/10 16:16
+
+  V2-17 30/03/2023 installé spare ex Cv45
+  1- Efface sms en debut de traitement
+  2- Renvoie sur liste restreinte message provenant d'un numéro < 8 chiffres (N° Free)
+
+  Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
+  Arduino IDE 1.8.19 : 1018162 77%, 47928 14% sur PC
+  Arduino IDE 1.8.19 : 1018110 77%, 47928 14% sur raspi
+
 
   V2-16 15/07/2022 installé Cv65(spare ex Cv55) item 1 et 2 seulement
   1- Verif Feu blanc que si Allume
@@ -136,7 +142,7 @@
 
 #include <Arduino.h>
 
-String ver        = "V2-16";
+String ver        = "V2-17";
 int    Magique    = 13;
 
 #include <Battpct.h>
@@ -982,10 +988,28 @@ void traite_sms(byte slot) {
       }
       Serial.print(F("Nom appelant = ")), Serial.println(nom);
       Serial.print(F("Numero = ")), Serial.println(numero);
+      byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
+      if(numero.length() < 8){ // numero service free
+        for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
+          if (config.Pos_Pn_PB[Index] == 1) { // Num dans liste restreinte
+            String number = Sim800.getPhoneBookNumber(Index);
+            char num[13];
+            number.toCharArray(num, 13);
+            message = textesms;
+            EnvoyerSms(num, true);
+            EffaceSMS(slot);
+            return; // sortir de la procedure traite_sms
+          }
+        }
+      }
     }
     else {
       textesms = String(replybuffer);
       nom = F("console");
+    }
+
+    if (sms) { // suppression du SMS
+      EffaceSMS(slot);
     }
 
     if (!(textesms.indexOf(F("TEL")) == 0 || textesms.indexOf(F("tel")) == 0 || textesms.indexOf(F("Tel")) == 0
@@ -1521,7 +1545,7 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
         if (ok) {
-          if (sms)EffaceSMS(slot);
+          // if (sms)EffaceSMS(slot);
           SignalVie();
           // action_wakeup_reason(4);
         }
@@ -1543,9 +1567,9 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
         if (ok) {
-          if (sms){
-            EffaceSMS(slot);
-          }
+          // if (sms){
+          //   EffaceSMS(slot);
+          // }
           Extinction();
           action_wakeup_reason(4);
         }
@@ -2243,9 +2267,6 @@ fin_i:
       Sbidon += String(numero);
       Serial.println(Sbidon);
       MajLog("Auto", Sbidon);// renseigne log
-    }
-    if (sms) { // suppression du SMS
-      EffaceSMS(slot);
     }
   }
 }
@@ -2982,11 +3003,11 @@ void ConnexionWifi(char* ssid, char* pwd, char* number, bool sms) {
   }
   EnvoyerSms(number, sms);
 
-  if (sms) { // suppression du SMS
-    /* Obligatoire ici si non bouclage au redemarrage apres timeoutwifi
-      ou OTA sms demande Wifi toujours present */
-    EffaceSMS(slot);
-  }
+  // if (sms) { // suppression du SMS
+  //   /* Obligatoire ici si non bouclage au redemarrage apres timeoutwifi
+  //     ou OTA sms demande Wifi toujours present */
+  //   EffaceSMS(slot);
+  // }
   debut = millis();
   if (!error) {
     /* boucle permettant de faire une mise à jour OTA et serveur, avec un timeout en cas de blocage */
