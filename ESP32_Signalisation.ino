@@ -73,8 +73,8 @@
   2- Renvoie sur liste restreinte message provenant d'un numéro < 8 chiffres (N° Free)
 
   Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
-  Arduino IDE 1.8.19 : 1018162 77%, 47928 14% sur PC
-  Arduino IDE 1.8.19 : 1018110 77%, 47928 14% sur raspi
+  Arduino IDE 1.8.19 : 1017866 77%, 47928 14% sur PC
+  Arduino IDE 1.8.19 : 1017814 77%, 47928 14% sur raspi
 
 
   V2-16 15/07/2022 installé Cv65(spare ex Cv55) item 1 et 2 seulement
@@ -1008,7 +1008,7 @@ void traite_sms(byte slot) {
       nom = F("console");
     }
 
-    if (sms) { // suppression du SMS
+    if (sms && !(textesms.indexOf(F("MAJHEURE")) == 0)) { // suppression du SMS sauf si MAJHEURE
       EffaceSMS(slot);
     }
 
@@ -1249,6 +1249,7 @@ fin_i:
         message += F("Mise a l'heure");
         // Sim800.reset(SIMPIN);// lancer SIM800
         if (gsm)MajHeure(Sim800.getTimeSms(slot)); // mise a l'heure du sms
+        EffaceSMS(slot);
         if (nom != F("Moi meme")) EnvoyerSms(number, sms);
       }
       else if (gsm && textesms.indexOf(F("IMEI")) > -1) {
