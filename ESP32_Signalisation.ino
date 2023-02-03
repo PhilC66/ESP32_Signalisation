@@ -68,13 +68,13 @@
 	to do
   
 
-  V2-17 30/03/2023 installé spare ex Cv45
+  V2-17 03/02/2023 installé spare ex Cv45
   1- Efface sms en debut de traitement
   2- Renvoie sur liste restreinte message provenant d'un numéro < 8 chiffres (N° Free)
 
-  Compilation LOLIN D32,default,80MHz, ESP32 1.0.2 (version > bug avec SPIFFS?)
-  Arduino IDE 1.8.19 : 1017866 77%, 47928 14% sur PC
-  Arduino IDE 1.8.19 : 1017814 77%, 47928 14% sur raspi
+  Compilation LOLIN D32,default,80MHz, IMPORTANT ESP32 1.0.2 (version > bug avec SPIFFS?)
+  Arduino IDE 1.8.19 : 1017882 77%, 47928 14% sur PC
+  Arduino IDE 1.8.19 : 1017830 77%, 47928 14% sur raspi
 
 
   V2-16 15/07/2022 installé Cv65(spare ex Cv55) item 1 et 2 seulement
@@ -2302,7 +2302,6 @@ void envoieGroupeSMS(byte grp, bool m) {
     /* m=0 message normal/finanalyse
     	si grp = 0,
       envoie un SMS à tous les numero existant (9 max) du Phone Book
-    	SAUF ceux de la liste restreinte
       si grp = 1,
       envoie un SMS à tous les numero existant (9 max) du Phone Book
       de la liste restreinte config.Pos_Pn_PB[x]=1
@@ -2313,7 +2312,7 @@ void envoieGroupeSMS(byte grp, bool m) {
     // Serial.print(F("Nombre de ligne PB=")),Serial.println(n);
     if (grp == 3) n = 1; // limite la liste à ligne 1
     for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
-      if ((grp == 3) || (grp == 0 && config.Pos_Pn_PB[Index] == 0) || (grp == 1 && config.Pos_Pn_PB[Index] == 1)) {
+      if ((grp == 3) || (grp == 0) || (grp == 1 && config.Pos_Pn_PB[Index] == 1)) {
         String number = Sim800.getPhoneBookNumber(Index);
         generationMessage(m);
         char num[13];
