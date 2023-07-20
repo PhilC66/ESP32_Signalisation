@@ -73,7 +73,7 @@
   2- Renvoie sur liste restreinte message provenant d'un numéro < 8 chiffres (N° Free)
 
   Compilation LOLIN D32,default,80MHz, IMPORTANT ESP32 1.0.2 (version > bug avec SPIFFS?)
-  Arduino IDE 1.8.19 : 1017882 77%, 47928 14% sur PC
+  Arduino IDE 1.8.19 : 1018786 77%, 47936 14% sur PC
   Arduino IDE 1.8.19 : 1017830 77%, 47928 14% sur raspi
 
 
@@ -2247,6 +2247,7 @@ fin_i:
       }
       else if (textesms.indexOf(F("SENDAT")) == 0){
         // envoie commande AT au SIM800
+        // ex: SENDAT=AT+CCLK="23/07/19,10:00:20+04" mise à l'heure
         // attention DANGEREUX pas de verification!
         if (textesms.indexOf(char(61)) == 6) {
           String CdeAT = textesms.substring(7, textesms.length());
