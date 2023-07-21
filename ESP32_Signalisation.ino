@@ -67,6 +67,14 @@
 
 	to do
   
+  V2-18 02/07/2023 installé spare ex Cv45
+  nouveau Magique
+  1- Prise en compte nouvelle batterie LiFePO
+    nouveau parametre config.TypeBatt: 16 Pb 6elts, 24LiFePO 4elts
+
+  Compilation LOLIN D32,default,80MHz, IMPORTANT ESP32 1.0.2 (version > bug avec SPIFFS?)
+  Arduino IDE 1.8.19 : 1020222 77%, 47936 14% sur PC
+  Arduino IDE 1.8.19 : 1019574 77%, 47928 14% sur raspi (sans ULP)
 
   V2-17 03/02/2023 installé spare ex Cv45
   1- Efface sms en debut de traitement
@@ -142,8 +150,8 @@
 
 #include <Arduino.h>
 
-String ver        = "V2-17";
-int    Magique    = 13;
+String ver        = "V2-18";
+int    Magique    = 14;
 
 #include <Battpct.h>
 #include <Sim800l.h>              //my SIM800 modifié
@@ -302,6 +310,7 @@ struct  config_t           // Structure configuration sauvée en EEPROM
   char    ftpUser[9];      // user ftp
   char    ftpPass[16];     // pwd ftp
   int     ftpPort;         // port ftp
+  int     TypeBatt;        // Type Batterie 16: Pb 6elts, 24 LiFePO 4elts
 } ;
 config_t config;
 
@@ -422,6 +431,7 @@ void setup() {
     config.LumAuto       = true;
     config.AutoF         = true;
     config.TempoAutoF    = 3600;
+    config.TypeBatt      = 16; // Pb par défaut
     for (int i = 0; i < 10; i++) {// initialise liste PhoneBook liste restreinte
       config.Pos_Pn_PB[i] = 0;
     }
@@ -680,15 +690,18 @@ void Acquisition() {
     cptallume = 0;
     FlagAlarme24V = false;
   }
+  int etatbatt = 0;
+  if (config.TypeBatt == 16) etatbatt = BattPBpct(TensionBatterie, 6);
+  if (config.TypeBatt == 24) etatbatt = BattLiFePopct(TensionBatterie, 4);
 
-  if (BattPBpct(TensionBatterie, 6) < 25 || VUSB < 4000) { // || VUSB > 6000
+  if (etatbatt < 25 || VUSB < 4000) { // || VUSB > 6000
     nalaTension ++;
     if (nalaTension == 4) {
       FlagAlarmeTension = true;
       nalaTension = 0;
     }
   }
-  else if (BattPBpct(TensionBatterie, 6) > 80 && VUSB > 4500) { //  && VUSB < 5400	//hysteresis et tempo sur Alarme Batterie
+  else if (etatbatt > 80 && VUSB > 4500) { //  && VUSB < 5400	//hysteresis et tempo sur Alarme Batterie
     nRetourTension ++;
     if (nRetourTension == 4) {
       FlagAlarmeTension = false;
@@ -703,7 +716,8 @@ void Acquisition() {
   message = F(" Batt Solaire = ");
   message += float(TensionBatterie / 100.0);
   message += "V ";
-  message += String(BattPBpct(TensionBatterie, 6));
+  if (config.TypeBatt == 16) message += String(BattPBpct(TensionBatterie, 6));
+  if (config.TypeBatt == 24) message += String(BattLiFePopct(TensionBatterie, 4));
   message += "%";
   message += F(", Batt Proc = ");
   message += (String(VBatterieProc) + "mV ");
@@ -1173,7 +1187,8 @@ fin_i:
         message += F("V Batt Sol= ");
         message += String(float(TensionBatterie / 100.0));
         message += F("V, ");
-        message += String(BattPBpct(TensionBatterie, 6));
+        if (config.TypeBatt == 16) message += String(BattPBpct(TensionBatterie, 6));
+        if (config.TypeBatt == 24) message += String(BattLiFePopct(TensionBatterie, 4));
         message += " %";
         message += fl;
         message += F("V USB= ");
@@ -1725,7 +1740,8 @@ fin_i:
         if (M == 1) {
           message += fl;
           message += F("Batterie = ");
-          message += String(BattPBpct(tension, 6));
+          if(config.TypeBatt == 16) message += String(BattPBpct(tension, 6));
+          if(config.TypeBatt == 24) message += String(BattLiFePopct(tension, 4));
           message += "%";
         }
         message += fl;
@@ -2253,9 +2269,22 @@ fin_i:
           String CdeAT = textesms.substring(7, textesms.length());
           String reply = sendAT(CdeAT,"OK","ERROR",1000);
           // Serial.print("reponse: "),Serial.println(reply);
-          message += String(reply);          
+          message += String(reply);
           EnvoyerSms(number, sms);
         }
+      }
+      else if (textesms.indexOf(F("TYPEBATT")) == 0){ // Type Batterie
+        if (textesms.indexOf(char(61)) == 8) {
+          int type = textesms.substring(9, textesms.length()).toInt();
+          if(type == 16 || type == 24){
+            config.TypeBatt = type;
+            sauvConfig();													// sauvegarde en EEPROM
+          }
+        }
+        message += "Type Batterie:" + fl;
+        if(config.TypeBatt == 16) message += "Pb 12V";
+        if(config.TypeBatt == 24) message += "LiFePO 12.8V";
+        EnvoyerSms(number, sms);
       }
       //**************************************
       else {
@@ -2377,12 +2406,14 @@ void generationMessage(bool n) {
   message += F("Batterie : ");
   if (!FlagAlarmeTension) {
     message += F("OK, ");
-    message += String(BattPBpct(TensionBatterie, 6));
+    if(config.TypeBatt == 16) message += String(BattPBpct(TensionBatterie, 6));
+    if(config.TypeBatt == 24) message += String(BattLiFePopct(TensionBatterie, 4));
     message += "%" + fl;
   }
   else {
     message += F("Alarme, ");
-    message += String(BattPBpct(TensionBatterie, 6));
+    if(config.TypeBatt == 16) message += String(BattPBpct(TensionBatterie, 6));
+    if(config.TypeBatt == 24) message += String(BattLiFePopct(TensionBatterie, 4));
     message += "%";
     message += fl;
     message += F("V USB =");
@@ -2924,6 +2955,9 @@ void PrintEEPROM() {
   Serial.print(F("Luminosité Auto = "))         , Serial.println(config.LumAuto);
   Serial.print("Auto F si O/S = ")              , Serial.println(config.AutoF);
   Serial.print("Tempo Auto (s) = ")             , Serial.println(config.TempoAutoF);
+  Serial.print("Type Batterie = ");
+  if(config.TypeBatt == 16) Serial.println(F("Pb 12V 6elts"));
+  if(config.TypeBatt == 24) Serial.println(F("LiFePO 12.8V 4elts"));
   Serial.print(F("Liste Restreinte = "));
   for (int i = 1; i < 10; i++) {
     Serial.print(config.Pos_Pn_PB[i]);
@@ -3495,6 +3529,14 @@ void HomePage() {
   webpage += F("<tr>");
   webpage += F("<td>Fin Jour</td>");
   webpage += F("<td>");	webpage += Hdectohhmm(config.FinJour);	webpage += F("</td>");
+  webpage += F("</tr>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>Type Batterie</td>");
+  webpage += F("<td>");	
+  if(config.TypeBatt == 16) webpage += F("Pb 12V 6elts");
+  if(config.TypeBatt == 24) webpage += F("LiFePO 12.8V 4elts");
+  webpage += F("</td>");
   webpage += F("</tr>");
 
   webpage += F("<tr>");
