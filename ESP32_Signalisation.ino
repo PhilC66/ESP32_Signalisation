@@ -71,9 +71,10 @@
   nouveau Magique
   1- Prise en compte nouvelle batterie LiFePO
     nouveau parametre config.TypeBatt: 16 Pb 6elts, 24LiFePO 4elts
+  2- seuil alarme retour >=80%
 
   Compilation LOLIN D32,default,80MHz, IMPORTANT ESP32 1.0.2 (version > bug avec SPIFFS?)
-  Arduino IDE 1.8.19 : 1020222 77%, 47936 14% sur PC
+  Arduino IDE 1.8.19 : 1020226 77%, 47936 14% sur PC
   Arduino IDE 1.8.19 : 1019574 77%, 47928 14% sur raspi (sans ULP)
 
   V2-17 03/02/2023 installé spare ex Cv45
@@ -701,7 +702,7 @@ void Acquisition() {
       nalaTension = 0;
     }
   }
-  else if (etatbatt > 80 && VUSB > 4500) { //  && VUSB < 5400	//hysteresis et tempo sur Alarme Batterie
+  else if (etatbatt >= 80 && VUSB >= 4500) { //  && VUSB < 5400	//hysteresis et tempo sur Alarme Batterie
     nRetourTension ++;
     if (nRetourTension == 4) {
       FlagAlarmeTension = false;
