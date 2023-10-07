@@ -66,6 +66,9 @@
 
 
 	to do
+  passer à nouvelle version SPIFFS
+  passer en 4G
+  faire message en SMS ou SMS+MQTT
   
   V2-18 02/07/2023 installé spare ex Cv45 voir fichier etatversion.txt
   nouveau Magique
