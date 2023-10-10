@@ -66,13 +66,20 @@
 
 
 	to do
-  passer ESP32 V2+
-  passer à nouvelle version SPIFFS LittelFs
-  remplacer EEPROM par file https://arduino.stackexchange.com/questions/90204/how-to-store-a-struct-in-a-file
+  ok passer ESP32 V2.0.11 Attention Wifi ne fonctionne pas avec ssid comportant _ underscrore
+  ok passer à nouvelle version SPIFFS LittelFs
+  ok remplacer EEPROM par file https://arduino.stackexchange.com/questions/90204/how-to-store-a-struct-in-a-file
   augmenter moyennage lors de la mesure tension calibration
   passer en 4G
   envoyer/recevoir message en SMS ou SMS+MQTT
-  
+
+  V3-0 10/10/2023
+  version ESP32 V2.0.11, LittleFS, suppression EEPROM
+  focntionnelle en 2G avant passage 4G
+  Compilation LOLIN D32,default,80MHz, ESP32 2.0.11
+  Arduino IDE 1.8.19 : 1095625 83%, 54456 17% sur PC
+  Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
+
   V2-18 02/07/2023 installé spare ex Cv45 voir fichier etatversion.txt
   nouveau Magique
   1- Prise en compte nouvelle batterie LiFePO
@@ -157,7 +164,7 @@
 
 #include <Arduino.h>
 
-String ver        = "V2-18";
+String ver        = "V3-00";
 int    Magique    = 14;
 
 #include <Battpct.h>
