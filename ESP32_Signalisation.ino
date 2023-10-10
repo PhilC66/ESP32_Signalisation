@@ -166,8 +166,6 @@ int    Magique    = 14;
 #include <TimeAlarms.h>
 #include <sys/time.h>             //<sys/time.h>
 #include <WiFi.h>
-// #include <EEPROM.h>               // variable en EEPROM(SPIFFS)
-// #include <SPIFFS.h>
 #include <LittleFS.h>
 #include <ArduinoOTA.h>
 #include <WiFiClient.h>
@@ -179,7 +177,6 @@ int    Magique    = 14;
 #include <ArduinoJson.h>
 #include <credentials_tpcf.h>
 
-// #define SPIFFS LittleFS // remplace SPIFFS par LittleFS
 String  webpage = "";
 #define ServerVersion "1.0"
 bool    LittleFS_present = false;
@@ -232,13 +229,6 @@ String fl = "\n";                   //  saut de ligne SMS
 String Id ;                         //  Id du materiel sera lu dans config
 char   SIM800InBuffer[64];          //  for notifications from the SIM800
 char   replybuffer[255];            //  Buffer de reponse SIM800
-// volatile int IRQ_Cpt_Ip1  = 0;      //  IRQ Ip1
-// volatile int IRQ_Cpt_Ip2  = 0;      //  IRQ Ip2
-// volatile unsigned long rebond1 = 0; //	antirebond IRQ
-// volatile unsigned long rebond2 = 0; //	antirebond IRQ
-// byte DbounceTime = 20;              // antirebond
-// byte confign = 0;                   // position enregistrement config EEPROM
-// byte recordn = 200;                 // position enregistrement log EEPROM
 bool Allume  = false;
 byte BlcPwmChanel = 0;
 byte VltPwmChanel = 1;
@@ -285,14 +275,6 @@ int    TableLum[11][2];      // Table PWM en fonction Luminosité
 WebServer server(80);
 File UploadFile;
 
-// typedef struct               // declaration structure  pour les log
-// {
-//   char    dt[10];            // DateTime 0610-1702 9+1
-//   char    Act[2];            // Action A/D/S/s 1+1
-//   char    Name[15];          // 14 car
-// } champ;
-// champ record[5];
-
 struct  config_t           // Structure configuration sauvée dans file config
 {
   int     magic;           // num magique
@@ -334,31 +316,9 @@ AlarmId DebutJour;         // Debut journée
 AlarmId FinJour;           // Fin de journée retour deep sleep
 AlarmId Auto_F;            // Tempo AutoF
 
-portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-
 HardwareSerial *SIM800Serial = &Serial2; // liaison serie FONA SIM800
 Sim800l Sim800;                          // to declare the library
 
-//---------------------------------------------------------------------------
-// void IRAM_ATTR handleInterruptIp1() { // Entrée 1
-
-//   portENTER_CRITICAL_ISR(&mux);
-//   if (xTaskGetTickCount() - rebond1 > DbounceTime) {
-//     IRQ_Cpt_Ip1++;
-//     rebond1 = xTaskGetTickCount(); // equiv millis()
-//   }
-//   portEXIT_CRITICAL_ISR(&mux);
-
-// }
-// void IRAM_ATTR handleInterruptIp2() { // Entrée 2
-
-//   portENTER_CRITICAL_ISR(&mux);
-//   if (xTaskGetTickCount() - rebond2 > DbounceTime) {
-//     IRQ_Cpt_Ip2++;
-//     rebond2 = xTaskGetTickCount(); // equiv millis()
-//   }
-//   portEXIT_CRITICAL_ISR(&mux);
-// }
 //---------------------------------------------------------------------------
 
 void setup() {
@@ -465,18 +425,7 @@ void setup() {
     tempftpPass.toCharArray(config.ftpPass,(tempftpPass.length() + 1));
 
     sauvConfig();
-    // valeur par defaut des record (log)
-    // for (int i = 0; i < 5 ; i++) {
-    //   temp = "";
-    //   temp.toCharArray(record[i].dt, 10);
-    //   temp.toCharArray(record[i].Act, 2);
-    //   temp.toCharArray(record[i].Name, 15);
-    // }
-    // writeFile(LittleFS,filelog,record);// ecriture des valeurs par defaut
-    // EEPROM.put(recordn, record);// ecriture des valeurs par defaut
-    // EEPROM.commit();
   }
-  // EEPROM.end();
   PrintConfig();
   Id  = String(config.Idchar);
   Id += fl;
@@ -514,9 +463,9 @@ void setup() {
     else if (error == OTA_END_ERROR)     Serial.println("End Failed");
   });
 
-  OuvrirCalendrier();					// ouvre calendrier circulation en SPIFFS
-  OuvrirFichierCalibration(); // ouvre fichier calibration en SPIFFS
-  OuvrirLumLUT();             // ouvre le fichier lumLUT
+  OuvrirCalendrier();					// ouvre calendrier circulation en LittleFS
+  OuvrirFichierCalibration(); // ouvre fichier calibration en LittleFS
+  OuvrirLumLUT();             // ouvre le fichier lumLUT en LittleFS
   // Serial.print(F("temps =")),Serial.println(millis());
   if (gsm) {
     Sim800.reset(SIMPIN);					// lancer SIM800
@@ -553,8 +502,6 @@ void setup() {
 void loop() {
   recvOneChar();
 
-  // if (rebond1 > millis()) rebond1 = millis();
-  // if (rebond2 > millis()) rebond2 = millis();
 //*************** Verification reception SMS ***************
   char* bufPtr = SIM800InBuffer;	//buffer pointer
   if (Serial2.available()) {      	//any data available from the FONA?
@@ -1049,7 +996,7 @@ void traite_sms(byte slot) {
           int n = textesms.substring(12, textesms.length()).toInt();
           if (n > 9 && n < 3601) {
             config.timeoutWifi = n;
-            sauvConfig();														// sauvegarde en EEPROM
+            sauvConfig();														// sauvegarde config
           }
         }
         message += F("TimeOut Wifi (s) = ");
@@ -1208,7 +1155,7 @@ fin_i:
         if (temp.length() > 0 && temp.length() < 11) {
           Id = "";
           temp.toCharArray(config.Idchar, 11);
-          sauvConfig();														// sauvegarde en EEPROM
+          sauvConfig();														// sauvegarde config
           Id = String(config.Idchar);
           Id += fl;
         }
@@ -1217,23 +1164,19 @@ fin_i:
         message += fl;
         EnvoyerSms(number, sms);
       }
-      // else if (textesms.indexOf(F("LOG")) == 0) {	// demande log des 5 derniers commandes
-      //   File f = SPIFFS.open(filelog, "r"); // taille du fichier log en SPIFFS
-      //   message = F("local log size :");
-      //   message += String(f.size()) + fl;
-      //   f.close();
-      //   for (int i = 0; i < 5; i++) {
-      //     message += String(record[i].dt) + "," + String(record[i].Act) + "," + String(record[i].Name) + fl;
-      //   }
-      //   //Serial.println( message);
-      //   EnvoyerSms(number, sms);
-      // }
+      else if (textesms.indexOf(F("LOG")) == 0) {	// demande taille du log
+        File f = LittleFS.open(filelog, "r"); // taille du fichier log en LittleFS
+        message = F("local log size :");
+        message += String(f.size()) + fl;
+        f.close();
+        EnvoyerSms(number, sms);
+      }
       else if (textesms.indexOf(F("ANTICIP")) > -1) { // Anticipation du wakeup
         if (textesms.indexOf(char(61)) == 7) {
           int n = textesms.substring(8, textesms.length()).toInt();
           if (n > 9 && n < 3601) {
             config.anticip = n;
-            sauvConfig();														// sauvegarde en EEPROM
+            sauvConfig();														// sauvegarde config
           }
         }
         message += F("Anticipation WakeUp (s) = ");
@@ -1246,7 +1189,7 @@ fin_i:
           long i = atol(textesms.substring(6).c_str()); //	Heure message Vie
           if (i > 0 && i <= 86340) {                    //	ok si entre 0 et 86340(23h59)
             config.DebutJour = i;
-            sauvConfig();                               // sauvegarde en EEPROM
+            sauvConfig();                               // sauvegarde config
             Alarm.disable(DebutJour);
             Alarm.write(DebutJour,config.DebutJour);
             // FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
@@ -1284,7 +1227,7 @@ fin_i:
           long i = atol(textesms.substring(4).c_str()); //	Heure
           if (i > 0 && i <= 86340) {										//	ok si entre 0 et 86340(23h59)
             config.FinJour = i;
-            sauvConfig();															// sauvegarde en EEPROM
+            sauvConfig();															// sauvegarde config
             Alarm.disable(FinJour);
             Alarm.write(FinJour,config.FinJour);
             // FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
@@ -1301,7 +1244,7 @@ fin_i:
         if ((textesms.indexOf(char(61))) == 5) { // =
           if (textesms.substring(6) == "1" || textesms.substring(6) == "0") {
             config.AutoF = textesms.substring(6).toInt();
-            sauvConfig();	// sauvegarde en EEPROM
+            sauvConfig();	// sauvegarde config
           }
         }
         message += "AutoF ";
@@ -1320,7 +1263,7 @@ fin_i:
         if ((textesms.indexOf(char(61))) == 10) { // =
           if (textesms.substring(11).toInt() > 100 && textesms.substring(11).toInt() < 36000) {
             config.TempoAutoF = textesms.substring(11).toInt();
-            sauvConfig();	// sauvegarde en EEPROM
+            sauvConfig();	// sauvegarde config
           }
         }
         message += "AutoF ";
@@ -1354,7 +1297,7 @@ fin_i:
         if ((textesms.indexOf(char(61))) == 7) { // =
           if (textesms.substring(8) == "1" || textesms.substring(8) == "0") {
             config.LumAuto = textesms.substring(8).toInt();
-            sauvConfig();	// sauvegarde en EEPROM
+            sauvConfig();	// sauvegarde config
           }
         }
         message += F("Luminosite ");
@@ -1468,7 +1411,7 @@ fin_i:
               calendrier[m][j] = jour[j - 1];
             }
             // Serial.print("mois:"),Serial.println(m);
-            EnregistreCalendrier(); // Sauvegarde en SPIFFS
+            EnregistreCalendrier(); // Sauvegarde en LittleFS
             // message += F("Mise a jour calendrier \nmois:");
             // message += m;
             // message += " OK (json)";
@@ -1506,7 +1449,7 @@ fin_i:
                 calendrier[m][i] = textesms.substring(p2 + i, p2 + i + 1).toInt();
                 // Serial.print(textesms.substring(p2+i,p2+i+1));
               }
-              EnregistreCalendrier(); // Sauvegarde en SPIFFS
+              EnregistreCalendrier(); // Sauvegarde en LittleFS
               // message += F("Mise a jour calendrier mois:");
               // message += m;
               // message += " OK";
@@ -1554,7 +1497,7 @@ fin_i:
       else if (textesms == F("CIRCULE")) {
         bool ok = false;
         /* demande passer en mode Circulé pour le jour courant,
-        	sans modification calendrier enregistré en SPIFFS */
+        	sans modification calendrier enregistré en LittleFS */
         if (!(calendrier[month()][day()] ^ flagCircule)) {
           // calendrier[month()][day()] = 1;
           message += F("OK, Circule");
@@ -1575,7 +1518,7 @@ fin_i:
       else if (textesms == F("NONCIRCULE")) {
         bool ok = false;
         /* demande passer en mode nonCirculé pour le jour courant,
-          sans modification calendrier enregistré en SPIFFS 
+          sans modification calendrier enregistré en LittleFS 
           extinction Feux*/
         if (calendrier[month()][day()] ^ flagCircule) {
           // calendrier[month()][day()] = 0;
@@ -1601,7 +1544,7 @@ fin_i:
           int i = textesms.substring(12).toInt(); //	durée
           if (i > 59 && i <= 36000) { // 1mn à 10H
             config.RepeatWakeUp = i;
-            sauvConfig();															// sauvegarde en EEPROM
+            sauvConfig();															// sauvegarde config
           }
         }
         message += F("Tempo repetition Wake up (s)=");
@@ -1637,7 +1580,7 @@ fin_i:
               for (int i = 1; i < 10; i++) {
                 config.Pos_Pn_PB[i] = Num[i];
               }
-              sauvConfig();															// sauvegarde en EEPROM
+              sauvConfig();															// sauvegarde config
             }
           }
         }
@@ -1725,7 +1668,7 @@ fin_i:
           // tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
           CoeffTension[M - 1] = coef;
           FlagCalibration = false;
-          Recordcalib();														// sauvegarde en SPIFFS
+          Recordcalib();														// sauvegarde en LittleFS
 
           if (M == 4 && !Allume) {
             digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
@@ -2006,7 +1949,7 @@ fin_i:
             }
           }
           if (valid) {
-            sauvConfig();															// sauvegarde en EEPROM
+            sauvConfig();															// sauvegarde config
           }
         }
         message += "Entree 1 ";
@@ -2039,7 +1982,7 @@ fin_i:
             }
           }
           if (valid) {
-            sauvConfig();															// sauvegarde en EEPROM
+            sauvConfig();															// sauvegarde config
           }
         }
         message += "Entree 2 ";
@@ -2092,7 +2035,7 @@ fin_i:
           strncpy(config.ftpUser,     ftpdata["user"],    11);
           strncpy(config.ftpPass,     ftpdata["pass"],    16);
           config.ftpPort         =    ftpdata["port"];
-          sauvConfig();													// sauvegarde en EEPROM
+          sauvConfig();													// sauvegarde config
         }
       }
       else if ((textesms.indexOf(char(61))) == 7) { // format sms
@@ -2110,7 +2053,7 @@ fin_i:
             Sbidon = textesms.substring(x + 1, y);
             Sbidon.toCharArray(config.ftpPass, (Sbidon.length() + 1));
             config.ftpPort = textesms.substring(y + 1, zz).toInt();
-            sauvConfig();													// sauvegarde en EEPROM
+            sauvConfig();													// sauvegarde config
           }
           else {
             erreur = true;
@@ -2185,7 +2128,7 @@ fin_i:
             // Serial.print("apn:"),Serial.println(config.apn);
             // Serial.print("user:"),Serial.println(config.gprsUser);
             // Serial.print("pass:"),Serial.println(config.gprsPass);
-            sauvConfig();													// sauvegarde en EEPROM
+            sauvConfig();													// sauvegarde config
           }
         }
         else if ((textesms.indexOf(char(61))) == 8) { // format sms
@@ -2215,7 +2158,7 @@ fin_i:
               // Serial.print("user:"),Serial.println(config.gprsUser);
               // Serial.print("pass:"),Serial.println(config.gprsPass);
 
-              sauvConfig();													// sauvegarde en EEPROM
+              sauvConfig();													// sauvegarde config
             }
             else {
               erreur = true;
@@ -2284,7 +2227,7 @@ fin_i:
           int type = textesms.substring(9, textesms.length()).toInt();
           if(type == 16 || type == 24){
             config.TypeBatt = type;
-            sauvConfig();													// sauvegarde en EEPROM
+            sauvConfig();													// sauvegarde config
           }
         }
         message += "Type Batterie:" + fl;
@@ -2336,7 +2279,7 @@ void envoie_alarme() {
 void envoieGroupeSMS(byte grp, bool m) {
   if (gsm) {
     /* m=0 message normal/finanalyse
-    	si grp = 0,
+      si grp = 0,
       envoie un SMS à tous les numero existant (9 max) du Phone Book
       si grp = 1,
       envoie un SMS à tous les numero existant (9 max) du Phone Book
@@ -2622,13 +2565,6 @@ void SignalVie() {
   action_wakeup_reason(4);
 }
 //---------------------------------------------------------------------------
-// void sauvConfig() { // sauve configuration en EEPROM
-//   EEPROM.begin(512);
-//   EEPROM.put(confign, config);
-//   EEPROM.commit();
-//   EEPROM.end();
-// }
-//---------------------------------------------------------------------------
 String displayTime(byte n) {
   // n = 0 ; dd/mm/yyyy hh:mm:ss
   // n = 1 ; yyyy-mm-dd hh:mm:ss
@@ -2641,49 +2577,6 @@ String displayTime(byte n) {
   }
   return String(bid);
 }
-//---------------------------------------------------------------------------
-// void logRecord(String nom, String action) { // renseigne log et enregistre EEPROM
-//   static int index = 0;
-//   String temp;
-//   if (month() < 10) {
-//     temp =  "0" + String(month());
-//   }
-//   else {
-//     temp = String(month());
-//   }
-//   if (day() < 10 ) {
-//     temp += "0" + String(day());
-//   }
-//   else {
-//     temp += String(day());
-//   }
-//   if (hour() < 10) {
-//     temp += "-0" + String(hour());
-//   }
-//   else {
-//     temp += "-" + String(hour());
-//   }
-//   if (minute() < 10) {
-//     temp += "0" + String(minute());
-//   }
-//   else {
-//     temp += String(minute());
-//   }
-//   temp  .toCharArray(record[index].dt, 10);
-//   nom   .toCharArray(record[index].Name, 15);
-//   action.toCharArray(record[index].Act, 2);
-
-//   EEPROM.begin(512);
-//   EEPROM.put(recordn, record);// ecriture des valeurs par defaut
-//   EEPROM.commit();
-//   EEPROM.end();
-//   if (index < 4) {
-//     index ++;
-//   }
-//   else {
-//     index = 0;
-//   }
-// }
 //---------------------------------------------------------------------------
 void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
   Serial.printf("Listing directory: %s\r\n", dirname);
@@ -2943,7 +2836,7 @@ void OuvrirLumLUT() {
 }
 //---------------------------------------------------------------------------
 int lumlut(int l) {
-  // retourn la valeur lut en fonction de lum actuelle
+  // retourne la valeur lut en fonction de lum actuelle
   for (int i = 0; i < 11; i++) {
     if (l >= TableLum[i][0]) {
       // Serial.printf("%s%d,%d\n","lumlut=",l,TableLum[i][1]);
@@ -2955,7 +2848,6 @@ int lumlut(int l) {
 //---------------------------------------------------------------------------
 void OuvrirCalendrier() {
 
-  // this opens the file "f.txt" in read-mode
   listDir(LittleFS, "/", 0);
   bool f = LittleFS.exists(filecalendrier);
   // Serial.println(f);
@@ -3243,24 +3135,6 @@ long Hhmmtohdec(String h){
   return hms;
 }
 //---------------------------------------------------------------------------
-// void DesActiveInterrupt() {
-//   if (config.Ip1) {
-//     detachInterrupt(digitalPinToInterrupt(PinIp1));
-//   }
-//   if (config.Ip2) {
-//     detachInterrupt(digitalPinToInterrupt(PinIp2));
-//   }
-// }
-//---------------------------------------------------------------------------
-// void ActiveInterrupt() {
-//   if (config.Ip1) {
-//     attachInterrupt(digitalPinToInterrupt(PinIp1), handleInterruptIp1, FALLING);
-//   }
-//   if (config.Ip2) {
-//     attachInterrupt(digitalPinToInterrupt(PinIp2), handleInterruptIp2, FALLING);
-//   }
-// }
-//---------------------------------------------------------------------------
 void AIntru_HeureActuelle() {
 
   long Heureactuelle = HActuelledec();
@@ -3269,33 +3143,21 @@ void AIntru_HeureActuelle() {
     if ((Heureactuelle > config.FinJour && Heureactuelle > config.DebutJour)
         || (Heureactuelle < config.FinJour && Heureactuelle < config.DebutJour)) {
       // Nuit
-      IntruD();
+      jour = false;
     }
     else {	// Jour
-      IntruF();
+      jour = true;
     }
   }
   else {
     if (Heureactuelle > config.FinJour && Heureactuelle < config.DebutJour) {
       // Nuit
-      IntruD();
+      jour = false;
     }
     else {	// Jour
-      IntruF();
+      jour = true;
     }
   }
-}
-//---------------------------------------------------------------------------
-void IntruF() { // Charge parametre Alarme Intrusion Jour
-  // Nmax = config.Jour_Nmax;
-  jour = true;
-  // Serial.println(F("Jour"));
-}
-//---------------------------------------------------------------------------
-void IntruD() { // Charge parametre Alarme Intrusion Nuit
-  // Nmax = config.Nuit_Nmax;
-  jour = false;
-  // Serial.println(F("Nuit"));
 }
 //---------------------------------------------------------------------------
 void DebutSleep() {
@@ -3349,9 +3211,9 @@ void action_wakeup_reason(byte wr) { // action en fonction du wake up
     case 3: // ESP_SLEEP_WAKEUP_EXT1
 
       /* declenchement externe pendant deep sleep
-      	si nuit ou jour noncirculé
-      	on reste en fonctionnement pendant TempoAnalyse
-      	avant retour deep sleep*/
+        si nuit ou jour noncirculé
+        on reste en fonctionnement pendant TempoAnalyse
+        avant retour deep sleep*/
       // WupAlarme = true;
       // LastWupAlarme = true;
       // Alarm.enable(TempoAnalyse); // debut tempo analyse ->fonctionnement normal
@@ -3518,8 +3380,8 @@ void print_uint64_t(uint64_t num) {
 void init_adc_mm(void) {
   //initialisation des tableaux
   /* valeur par defaut facultative,
-  	permet d'avoir une moyenne proche
-  	du resulat plus rapidement
+    permet d'avoir une moyenne proche
+    du resulat plus rapidement
   	val defaut = valdefaut*nSample */
   unsigned int ini_adc1 = 0;// val defaut adc 1
   unsigned int ini_adc2 = 0;// val defaut adc 2
