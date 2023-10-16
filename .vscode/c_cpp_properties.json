@@ -5,7 +5,7 @@
             "name": "Win32",
             "compilerPath": "C:\\Program Files\\LLVM\\bin\\clang.exe",
             "compilerArgs": [],
-            "intelliSenseMode": "clang-x64",
+            "intelliSenseMode": "windows-clang-x64",
             "includePath": [
                 "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\tools\\**",
                 "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\**",
@@ -238,7 +238,8 @@
                 "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.11\\cores\\esp32",
                 "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.11\\variants\\d32",
                 "F:\\Documents\\Arduino\\libraries\\BatteriePct",
-                "F:\\Documents\\Arduino\\libraries\\Sim800l",
+                "F:\\Documents\\Arduino\\libraries\\TinyGSMClient-master\\src",
+                "F:\\Documents\\Arduino\\libraries\\PubSubClient\\src",
                 "F:\\Documents\\Arduino\\libraries\\TimeAlarms-master",
                 "F:\\Documents\\Arduino\\libraries\\Time",
                 "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.11\\libraries\\WiFi\\src",
