@@ -91,7 +91,7 @@
 #include <Arduino.h>
 
 String ver        = "V3-01";
-int    Magique    = 1;
+int    Magique    = 2;
 
 #define TINY_GSM_MODEM_SIM7600
 
@@ -172,7 +172,7 @@ String bufferrcpt;
 String fl = "\n";                   //  saut de ligne SMS
 String Id ;                         //  Id du materiel sera lu dans config
 // char   SIM800InBuffer[64];          //  for notifications from the SIM800
-// char   replybuffer[255];            //  Buffer de reponse SIM800
+char   replybuffer[255];            //  Buffer de reponse SIM800
 bool Allume  = false;
 byte BlcPwmChanel = 0;
 byte VltPwmChanel = 1;
@@ -274,7 +274,9 @@ struct  config_t           // Structure configuration sauvée dans file config
   char    mqttServer[26];  // Serveur MQTT
   char    mqttUserName[11];// MQTT User
   char    mqttPass[16];    // MQTT pass
-  char    writeTopic[16];  // channel Id
+  char    sendTopic[20];   // channel Id output to server commun à tous
+  char    receiveTopic[20];// channel Id input from server
+  char    permanentTopic[20];  // channel Id
   int     mqttPort;        // Port serveur MQTT
   int     hete;            // decalage Heure été UTC
   int     hhiver;          // decalage Heure hiver UTC
@@ -425,7 +427,15 @@ void setup() {
     tempServer.toCharArray(config.mqttServer, (tempServer.length() + 1));
     tempmqttUserName.toCharArray(config.mqttUserName, (tempmqttUserName.length() + 1));
     tempmqttPass.toCharArray(config.mqttPass, (tempmqttPass.length() + 1));
-    temptopic.toCharArray(config.writeTopic, (temptopic.length() + 1));
+
+    strncpy(config.sendTopic,("Signalisation/input"),sizeof(config.sendTopic));
+    memcpy(config.receiveTopic,&config.Idchar[5],5);
+    config.receiveTopic[5] = '\0';
+    strcat(config.receiveTopic,"/output");
+    memcpy(config.permanentTopic,&config.Idchar[5],5);
+    config.permanentTopic[5] = '\0';
+    strcat(config.permanentTopic,"/permanent");
+
     sauvConfig();
   }
   PrintConfig();
@@ -514,18 +524,14 @@ void setup() {
     message = "";
 
     // GPRS connection parameters are usually set after network registration
-    Serial.print(F("Connecting to "));
-    Serial.print(config.apn);
-    if (!modem.gprsConnect(config.apn, config.gprsUser, config.gprsPass)) {
-      Serial.println(F(" fail"));
-      delay(10000);
-      // return;
-    }
-    Serial.println(F(" success"));
+    ConnectGPRS();
     if (modem.isGprsConnected()) { Serial.println(F("GPRS connected")); }
+
     // MQTT Broker setup
-    mqtt.setServer(config.mqttServer, config.mqttPort);//1883
-    // mqtt.setCallback(mqttCallback); // a creer quand besoin
+    mqtt.setServer(config.mqttServer, config.mqttPort); // Set the MQTT broker details.
+    mqtt.setCallback(mqttSubscriptionCallback);   // Set the MQTT message handler function.
+    
+    if(config.messageMode==1) mqttConnect();
     
     timesstatus();								// Etat synchronisation Heure Sys
     MajHeure();
@@ -595,7 +601,7 @@ void loop() {
       }
     }
   }
-  if(config.messageMode == true && lancement){  //config.messageMode = SMS+MQTT
+  if(gsm && config.messageMode == 1){  //config.messageMode = SMS+MQTT
     // Make sure we're still registered on the network
     // ne fonctionne pas si modem bloqué CGREG = 4
     // if (!modem.isNetworkConnected()) { // CGREG GPRS network registration status
@@ -615,14 +621,12 @@ void loop() {
       Serial.println(F("GPRS disconnected!"));
       Serial.print(F("Connecting to "));
       Serial.print(config.apn);
-      if (!modem.gprsConnect(config.apn, config.gprsUser, config.gprsPass)) {
+      if (!modem.gprsConnect(config.apn, config.gprsUser, config.gprsPass)) {        
         Serial.println(F(" fail"));
         if (millis() - lastReconnectGPRSAttempt > 10000L){
           lastReconnectGPRSAttempt = millis();
           AlarmeGprs = true;
         }
-        // delay(10000);
-        // return
       } else {lastReconnectGPRSAttempt = 0;}
       if (modem.isGprsConnected()) {
         Serial.println(F(" GPRS reconnected"));
@@ -736,9 +740,6 @@ void Acquisition() {
     OuvrirFichierCalibration(); // patch relecture des coeff perdu
   }
 
-  // if (gsm) {
-  //   if (!Sim800.getetatSIM())Sim800.reset(SIMPIN); // verification SIM
-  // }
   Serial.println(displayTime(0));
   // Serial.print(F(" Freemem = ")), Serial.println(ESP.getFreeHeap());
   static byte nalaTension = 0;
@@ -831,6 +832,46 @@ void Acquisition() {
   else if (FlagReset) {
     FlagReset = false;
     ResetHard();				//	reset hard
+  }
+  if(gsm && config.messageMode == true && lancement){  //config.messageMode = SMS+MQTT
+    static byte nalaGprs = 0;
+    static byte nalaGps  = 0;
+    static byte nalaMQTT = 0;
+    if (AlarmeGprs) {
+      if (nalaGprs ++ > config.cptAla) {
+        FlagAlarmeGprs = true;
+        nalaGprs = 0;
+      }
+    } else {
+      if (nalaGprs > 0) {
+        nalaGprs --;
+      } else {
+        FlagAlarmeGprs = false;
+      }
+    }
+    if (AlarmeGps) {
+      if (nalaGps ++ > config.cptAla) {
+        FlagAlarmeGps = true;
+        nalaGps = 0;
+      }
+    } else {
+      if (nalaGps > 0) {
+        nalaGps --;
+      } else {
+        FlagAlarmeGps = false;
+      }
+    }
+    if (AlarmeMQTT) {
+      if (nalaMQTT ++ > config.cptAla) {
+        FlagAlarmeMQTT = true;
+        nalaMQTT = 0;
+      }
+      Serial.print(F("AlarmeMQTT: ")),Serial.println(nalaMQTT);
+    } else {
+      FlagAlarmeMQTT = false;
+      FlagAlarmeGprs = false;
+      nalaMQTT = 0;
+    }
   }
   envoie_alarme();
 
@@ -1087,6 +1128,7 @@ void traite_sms(byte slot) {
 
   if (!(smsstruct.message.indexOf(F("TEL")) == 0 || smsstruct.message.indexOf(F("tel")) == 0 || smsstruct.message.indexOf(F("Tel")) == 0
       || smsstruct.message.indexOf(F("Wifi")) == 0 || smsstruct.message.indexOf(F("WIFI")) == 0 || smsstruct.message.indexOf(F("wifi")) == 0
+      || smsstruct.message.indexOf(F("MQTTDATA")) > -1 || smsstruct.message.indexOf(F("MQTTSERVEUR")) > -1
       || smsstruct.message.indexOf(F("GPRSDATA")) > -1 || smsstruct.message.indexOf(F("FTPDATA")) > -1 || smsstruct.message.indexOf(F("FTPSERVEUR")) > -1)) {
     smsstruct.message.toUpperCase();	// passe tout en Maj sauf si "TEL" ou "WIFI" parametres pouvant contenir minuscules
     // smsstruct.message.trim();
@@ -1277,7 +1319,20 @@ fin_tel:
       if (temp.length() > 0 && temp.length() < 11) {
         Id = "";
         temp.toCharArray(config.Idchar, 11);
+        strncpy(config.sendTopic,("Signalisation/input"),sizeof(config.sendTopic));
+        memcpy(config.receiveTopic,&config.Idchar[5],5);
+        config.receiveTopic[5] = '\0';
+        strcat(config.receiveTopic,"/output");
+        memcpy(config.permanentTopic,&config.Idchar[5],5);
+        config.permanentTopic[5] = '\0';
+        strcat(config.permanentTopic,"/permanent");
         sauvConfig();														// sauvegarde config
+
+        if(config.messageMode == 1){ // changement d'id mqtt
+          mqtt.disconnect();
+          mqttConnect();
+        }
+
         Id = String(config.Idchar);
         Id += fl;
       }
@@ -2245,6 +2300,67 @@ fin_tel:
       message += F("\n au prochain demarrage");
       sendSMSReply(smsstruct.sendernumber, sms);
     }
+    else if (smsstruct.message.indexOf("MQTTDATA") > -1) {
+      // Parametres MQTTDATA=serveur:user:pass:port:permanent_topic:send_topic:receive_topic
+
+      bool erreur = false;
+      bool formatsms = false;
+      if (smsstruct.message.indexOf(":") == 11) { // format json
+        DynamicJsonDocument doc(384); //https://arduinojson.org/v6/assistant/
+        DeserializationError err = deserializeJson(doc, smsstruct.message);
+        if (err) {
+          erreur = true;
+        }
+        else {
+          JsonObject mqttdata = doc["MQTTDATA"];
+          strncpy(config.mqttServer,     mqttdata["serveur"],         26);
+          strncpy(config.mqttUserName,   mqttdata["user"],            11);
+          strncpy(config.mqttPass,       mqttdata["pass"],            16);
+          config.mqttPort            =   mqttdata["port"];
+          strncpy(config.permanentTopic, mqttdata["permanent_topic"], 20);
+          strncpy(config.sendTopic,      mqttdata["send_topic"],      20);
+          strncpy(config.receiveTopic,   mqttdata["receive_topic"],   17);
+          sauvConfig();
+        }
+      }
+      
+      if (!erreur) {
+        DynamicJsonDocument doc(256);
+        JsonObject MQTTDATA = doc.createNestedObject("MQTTDATA");
+        MQTTDATA["serveur"] = config.mqttServer;
+        MQTTDATA["user"]    = config.mqttUserName;
+        MQTTDATA["pass"]    = config.mqttPass;
+        MQTTDATA["port"]    = config.mqttPort;
+        MQTTDATA["permanent_topic"]   = config.permanentTopic;
+        MQTTDATA["send_topic"]   = config.sendTopic;
+        MQTTDATA["receive_topic"]   = config.receiveTopic;
+        
+        Sbidon = "";
+        serializeJson(doc, Sbidon);
+        message += Sbidon;
+        message += fl;
+      }
+      else {
+        message += "Erreur format";
+        message += fl;
+      }
+      sendSMSReply(smsstruct.sendernumber, sms);
+    }
+    else if (smsstruct.message.indexOf("MQTTSERVEUR") == 0) { // Serveur MQTT
+      // case sensitive
+      // MQTTSERVEUR=abcd.org
+      if (smsstruct.message.indexOf(char(61)) == 11) {
+        Sbidon = smsstruct.message.substring(12);
+        Serial.print("mqttserveur:"),Serial.print(Sbidon);
+        Serial.print(" ,"), Serial.println(Sbidon.length());
+        Sbidon.toCharArray(config.mqttServer, (Sbidon.length() + 1));
+        sauvConfig();
+      }
+      message += F("MQTTserveur =");
+      message += String(config.mqttServer);
+      message += F("\n au prochain demarrage");
+      sendSMSReply(smsstruct.sendernumber, sms);
+    }
     else if (smsstruct.message.indexOf(F("GPRSDATA")) > -1) {
       // Parametres GPRSDATA = "APN":"user":"pass"
       // GPRSDATA="sl2sfr":"":""
@@ -2413,6 +2529,27 @@ fin_tel:
       if(config.TypeBatt == 24) message += "LiFePO 12.8V";
       sendSMSReply(smsstruct.sendernumber, sms);
     }
+    else if (smsstruct.message.indexOf("MESSAGEMODE") == 0) {
+      // mode communcication 0 SMS only, 1 SMS+MQTT
+      if (smsstruct.message.indexOf(char(61)) == 11) {
+        int i = atoi(smsstruct.message.substring(12).c_str());
+        if (i == 0  || i == 1){
+          if(i == 1 && config.messageMode == 0){ // activer GPRS
+            ConnectGPRS();
+          } else if(i == 0 && config.messageMode == 1) { // desactiver GPRS
+            mqtt.disconnect();
+            modem.gprsDisconnect();
+          }
+          config.messageMode = i;
+          sauvConfig();													// sauvegarde config
+        }
+      }
+      message += "Message mode : ";
+      if(config.messageMode == 0){
+        message += "SMS";
+      } else { message += "SMS + MQTT";}
+      sendSMSReply(smsstruct.sendernumber, sms);
+    }
     //**************************************
     else {
       message += F("Commande non reconnue ?");		//"Commande non reconnue ?"
@@ -2447,6 +2584,14 @@ void envoie_alarme() {
     MajLog(F("Auto"), "Alarme Cde FBlc");
     FlagLastAlarmeCdeFBlc = FlagAlarmeCdeFBlc;
   }
+  if (FlagAlarmeGprs != FlagLastAlarmeGprs) {
+    SendEtat = true;
+    FlagLastAlarmeGprs = FlagAlarmeGprs;
+  }
+  if (FlagAlarmeMQTT != FlagLastAlarmeMQTT) {
+    SendEtat = true;
+    FlagLastAlarmeMQTT = FlagAlarmeMQTT;
+  }
   if (SendEtat) { 						// si envoie Etat demandé
     envoieGroupeSMS(0, 0);		// envoie groupé
     SendEtat = false;					// efface demande
@@ -2472,6 +2617,7 @@ void envoieGroupeSMS(byte grp, bool vie) {
       message_Monitoring_Reseau();
     }
     // if (grp == 3) n = 1; // limite la liste à ligne 1
+    if(config.messageMode) Envoyer_MQTT();
     for (byte Index = 1; Index < 10; Index++) {		// Balayage du PB
       Phone = {"",""};      
       if(modem.readPhonebookEntry(&Phone, Index)){
@@ -2501,7 +2647,8 @@ void generationMessage() {
   // n = 0 message normal
   // n = 1 message fin analyse
   messageId();
-  if (FlagAlarmeTension || FlagLastAlarmeTension || FlagAlarme24V || FlagAlarmeCdeFBlc) {
+  if (FlagAlarmeTension || FlagLastAlarmeTension || FlagAlarme24V || FlagAlarmeCdeFBlc
+      || FlagAlarmeGprs || FlagAlarmeMQTT) {
     message += F("--KO--------KO--");
   }
   else {
@@ -2587,6 +2734,22 @@ void generationMessage() {
   if(FlagAlarmeCdeFBlc){
     message += "Defaut Cde Feu Blanc" + fl;
   }
+  if (config.messageMode == true) {
+    message += F("Gprs ");
+    if (FlagAlarmeGprs) {
+      message += F("KO");
+    } else {
+      message += F("OK");
+    }
+    message += fl;
+    message += F("Mqtt ");
+    if (FlagAlarmeMQTT) {
+      message += F("KO");
+    } else {
+      message += F("OK");
+    }
+    message += fl;
+  }
 }
 //---------------------------------------------------------------------------
 void sendSMSReply(String num , bool sms) {
@@ -2627,6 +2790,23 @@ void sendSMSReply(String num , bool sms) {
   Serial.println(F("****************************"));
   Serial.println(message);
   Serial.println(F("****************************"));
+}
+//---------------------------------------------------------------------------
+void Envoyer_MQTT(){
+  // Sbidon = "\"" + message + "\"";  
+  Serial.print("message a envoyer MQTT:"),Serial.println(message);
+  Sbidon = message;
+  Sbidon.toCharArray(replybuffer, Sbidon.length() + 1);
+  byte cpt =0;
+
+  while( mqtt.publish(config.sendTopic, replybuffer) != 1){
+    Alarm.delay(500);
+    if(cpt ++ > 2){
+      Serial.print(F("send mqtt KO:")),Serial.println(cpt);
+      return;
+    }
+  }
+  Serial.println(F("send mqtt OK:"));
 }
 //---------------------------------------------------------------------------
 void read_RSSI() {	// lire valeur RSSI et remplir message
@@ -3127,21 +3307,23 @@ void PrintConfig() {
       Serial.print(F(","));
     }
   }
-  Serial.print(F("GPRS APN = ")),            Serial.println(config.apn);
-  Serial.print(F("GPRS user = ")),           Serial.println(config.gprsUser);
-  Serial.print(F("GPRS pass = ")),           Serial.println(config.gprsPass);
-  Serial.print(F("ftp serveur = ")),         Serial.println(config.ftpServeur);
-  Serial.print(F("ftp port = ")),            Serial.println(config.ftpPort);
-  Serial.print(F("ftp user = ")),            Serial.println(config.ftpUser);
-  Serial.print(F("ftp pass = ")),            Serial.println(config.ftpPass);
-  Serial.print(F("mqtt serveur = ")),        Serial.println(config.mqttServer);
-  Serial.print(F("mqtt port = ")),           Serial.println(config.mqttPort);
-  Serial.print(F("mqtt username = ")),       Serial.println(config.mqttUserName);
-  Serial.print(F("mqtt pass = ")),           Serial.println(config.mqttPass);
-  Serial.print(F("mqtt write Topic = ")),    Serial.println(config.writeTopic);
-  Serial.print(F("message Mode = ")),        Serial.println(config.messageMode);
-  Serial.print(F("declage Heure ete = ")),   Serial.println(config.hete);
-  Serial.print(F("declage Heure hiver = ")), Serial.println(config.hhiver);
+  Serial.print(F("GPRS APN = "))                , Serial.println(config.apn);
+  Serial.print(F("GPRS user = "))               , Serial.println(config.gprsUser);
+  Serial.print(F("GPRS pass = "))               , Serial.println(config.gprsPass);
+  Serial.print(F("ftp serveur = "))             , Serial.println(config.ftpServeur);
+  Serial.print(F("ftp port = "))                , Serial.println(config.ftpPort);
+  Serial.print(F("ftp user = "))                , Serial.println(config.ftpUser);
+  Serial.print(F("ftp pass = "))                , Serial.println(config.ftpPass);
+  Serial.print(F("mqtt serveur = "))            , Serial.println(config.mqttServer);
+  Serial.print(F("mqtt port = "))               , Serial.println(config.mqttPort);
+  Serial.print(F("mqtt username = "))           , Serial.println(config.mqttUserName);
+  Serial.print(F("mqtt pass = "))               , Serial.println(config.mqttPass);
+  Serial.print(F("sendTopic = "))               , Serial.println(config.sendTopic);
+  Serial.print(F("receiveTopic = "))            , Serial.println(config.receiveTopic);
+  Serial.print(F("permanentTopic = "))          , Serial.println(config.permanentTopic);
+  Serial.print(F("msg Mode 0SMS,1SMS+MQTT = ")) , Serial.println(config.messageMode);
+  Serial.print(F("declage Heure ete = "))       , Serial.println(config.hete);
+  Serial.print(F("declage Heure hiver = "))     , Serial.println(config.hhiver);
 }
 //---------------------------------------------------------------------------
 void ConnexionWifi(char* ssid, char* pwd, String number, bool sms) {
@@ -4447,25 +4629,34 @@ void timesstatus() {	// etat synchronisation time/heure systeme
   }
 }
 //---------------------------------------------------------------------------
+void ConnectGPRS(){
+  Serial.print(F("Connecting to "));
+  Serial.print(config.apn);
+  if (modem.gprsConnect(config.apn, config.gprsUser, config.gprsPass)) {
+    Serial.println(F(" success"));
+  }
+  else {
+    Serial.println(" fail");
+  }
+}
+//---------------------------------------------------------------------------
 boolean mqttConnect() {
   Serial.print(F("Connecting to "));
   Serial.print(config.mqttServer);
 
   // Connect to MQTT Broker
-  // boolean status = mqtt.connect("GsmClientTest");
   bool status = mqtt.connect(config.Idchar, config.mqttUserName, config.mqttPass);
-
-  // Or, if you want to authenticate MQTT:
-  // boolean status = mqtt.connect("GsmClientName", "mqtt_user", "mqtt_pass");
-
   if (status == false) {
     Serial.println(F(" fail"));
     return false;
   }
   Serial.println(F(" success"));
-  // mqtt.publish(config.writeTopic, "GsmClientTest started");
-  // mqtt.subscribe(topicLed);
-  // mqtt.subscribe(topicnetwork);
+  if(mqtt.subscribe(config.permanentTopic,1) == 1){
+    Serial.print(config.permanentTopic),Serial.println(" subcribed");
+  }
+  if(mqtt.subscribe(config.receiveTopic) == 1){
+    Serial.print(config.receiveTopic),Serial.println(" subcribed");
+  }
   return mqtt.connected();
 }
 //---------------------------------------------------------------------------
@@ -4582,6 +4773,47 @@ void Monitoring_Reseau(){
   else if(n>=4 && n<8){Histo_Reseau[3] ++;}
   else if(n==8){Histo_Reseau[4]        ++;}
   else {Histo_Reseau[1] ++;}
+}
+//---------------------------------------------------------------------------
+void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLength ) {
+  /* 6) Use the mqttSubscriptionCallback function to handle incoming MQTT messages.
+    The program runs smoother if the main loop performs the processing steps instead of the callback.
+    In this function, use flags to cause changes in the main loop. */
+  /**
+     Process messages received from subscribed channel via MQTT broker.
+       topic - Subscription topic for message.
+       payload - Field to subscribe to. Value 0 means subscribe to all fields.
+       mesLength - Message length.
+  */
+  Serial.print("Message arrived on topic: ");
+  Serial.print(topic);
+  Serial.print(" len:");
+  Serial.print(mesLength);
+  Serial.print(". Message: ");
+  
+  Sbidon = "";
+  
+  for (int i = 0; i < mesLength; i++) {
+    Serial.print((char)payload[i]);
+    Sbidon += (char)payload[i];
+  }
+  Sbidon.toCharArray(replybuffer, Sbidon.length() + 1);
+  Serial.println();
+
+  if(strcmp(topic,config.receiveTopic) == 0){
+    traite_sms(255);
+  } else if (strcmp(topic,config.permanentTopic) == 0){
+    if(Sbidon.length() > 0){
+      //renvoyer "" sur permanentTopic pour eviter repetition
+      char rep[2] = "";
+      if(mqtt.publish(config.permanentTopic, rep, true)){
+        Serial.println("efface permanent topic OK");
+      } else {
+        Serial.println("efface permanent topic KO");
+      }
+      traite_sms(255);
+    }
+  }
 }
 /* --------------------  test local serial seulement ----------------------*/
 void recvOneChar() {
