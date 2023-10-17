@@ -171,8 +171,8 @@ String message;
 String bufferrcpt;
 String fl = "\n";                   //  saut de ligne SMS
 String Id ;                         //  Id du materiel sera lu dans config
-char   SIM800InBuffer[64];          //  for notifications from the SIM800
-char   replybuffer[255];            //  Buffer de reponse SIM800
+// char   SIM800InBuffer[64];          //  for notifications from the SIM800
+// char   replybuffer[255];            //  Buffer de reponse SIM800
 bool Allume  = false;
 byte BlcPwmChanel = 0;
 byte VltPwmChanel = 1;
@@ -346,9 +346,12 @@ void setup() {
   }
 
   if (gsm) {
-    Serial.println("lancement SIM800");
-    // SIM800Serial->begin(9600); // 4800
-    SerialAT.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN); // verifier si ATI modeminfo fonctionne? si non reduire baudrate
+    Serial.println("lancement SIM7600");
+    // Set GSM module baud rate
+    // pour nouvelle carte avant premiere utilisation faire AT+IPREX=38400
+    // certaine cde comme ATI modeminfo ne fonctionne pas à 115200(val defaut usine),
+    // Ok à 57600, on garde une marge un cran en dessous = 38400 
+    SerialAT.begin(38400, SERIAL_8N1, RX_PIN, TX_PIN);
     Serial.println(F("Initializing modem..."));
     unsigned long debut = millis();
     while(!modem.init()){
@@ -402,7 +405,7 @@ void setup() {
     config.hete          = 2; // heure
     config.hhiver        = 1; // heure
     config.messageMode   = false; // SMS
-    config.cptAla           = 10; // 11*Acquisition time
+    config.cptAla        = 10; // 11*Acquisition time
     for (int i = 0; i < 10; i++) {// initialise liste PhoneBook liste restreinte
       config.Pos_Pn_PB[i] = 0;
     }
@@ -557,52 +560,40 @@ void setup() {
 void loop() {
   recvOneChar();
 
-//*************** Verification reception SMS ***************
-// Traitement des messages non sollicté en provenance modem
+  //*************** Verification reception SMS ***************
+  // Traitement des messages non sollicté en provenance modem
   // Attente donnée en provenance SIM7600
-  String bufferrcpt;
-  char* bufPtr ;//= fonaInBuffer;		//handy buffer pointer
-  if (SerialAT.available()>0) {   //any data available from the modem?
-    byte slot = 0;            		//this will be the slot number of the SMS
-    // int charCount = 0;
-    //Read the notification into fonaInBuffer
-    do  {
-      *bufPtr = SerialAT.read();
-      bufferrcpt += *bufPtr;
-      Serial.write(*bufPtr);
-      // Alarm.delay(1);
-    } while ((*bufPtr++ != '\n') && (SerialAT.available()) );// && (++charCount < (sizeof(fonaInBuffer) - 1)));
-    //Add a terminal NULL to the notification string
-    *bufPtr = 0;
-    // if (charCount > 1) {
-      // Serial.print(F("Buffer ="));
-      // Serial.println(bufferrcpt);
-    // }
-    // Si appel entrant on raccroche
-    if ((bufferrcpt.indexOf(F("RING"))) == 0) {	// RING, Ca sonne
-      // Serial.println(F("Ca sonne!!!!"));
-      modem.callHangup();											// on raccroche
+  // https://github.com/vshymanskyy/TinyGSM/pull/260/files
+  
+  if(SerialAT.available()) { // reception caracteres depuis modem
+    unsigned long timerStart,timerEnd;
+    String interrupt = "";
+    timerStart = millis();
+    while(1) {
+      if(SerialAT.available()) {
+          char c = SerialAT.read();
+          interrupt+=c;   
+      }
+      timerEnd = millis();
+      if(timerEnd - timerStart > 1500){
+      Serial.print("unsolicited message:"),Serial.println(interrupt);
+      if (interrupt.indexOf(F("CMTI")) >= 0 ) { // reception SMS
+        int p = interrupt.indexOf(","); // cherche numero de slot apres la virgule
+        slot = interrupt.substring(p+1,interrupt.length()).toInt();
+        // Serial.print(F("SMS en reception:")),Serial.println(slot);
+        traite_sms(slot);
+      }
+      if ((interrupt.indexOf(F("RING"))) >= 0) {	// Si appel entrant on raccroche
+        // Serial.println(F("Ca sonne!!!!"));
+        modem.callHangup();
+      }
+      if ((interrupt.indexOf(F("+CNTP: 0"))) >= 0 ) { // si reception relance majheure
+        // Serial.println(F("Relance mise à l'heure !"));
+        MajHeure();
+      }
+      break;
+      }
     }
-    if ((bufferrcpt.indexOf(F("PSUTTZ"))) >= 0 ) { // V2-17 rattrapage si erreur mise à la date
-      Serial.println(F("Relance mise à l'heure !"));
-      //FlagReset = true;	// on force redemarrage pour prendre la bonne date/time
-      MajHeure();
-    }
-    if ((bufferrcpt.indexOf(F("+CNTP: 0"))) >= 0 ) { // V4-0-2 si reception tardive relance majheure
-      Serial.println(F("Relance mise à l'heure !"));
-      MajHeure();
-    }
-    if (bufferrcpt.indexOf(F("CMTI")) >= 0 ) { 
-      int p = bufferrcpt.indexOf(",");
-      slot = bufferrcpt.substring(p+1,bufferrcpt.length()).toInt();
-      // Serial.print(F(", SMS en reception:")),Serial.println(slot);
-      traite_sms(slot);
-    }
-    // Scan the notification string for an SMS received notification.
-    // If it's an SMS message, we'll get the slot number in 'slot'
-    // if (1 == sscanf(fonaInBuffer, "+CMTI: \"SM\",%d", &slot)) {
-    //   traite_sms(slot);
-    // }
   }
   if(config.messageMode == true && lancement){  //config.messageMode = SMS+MQTT
     // Make sure we're still registered on the network
@@ -1072,27 +1063,23 @@ void traite_sms(byte slot) {
     nomAppelant = Phone.text;
     Serial.print(F("Nom appelant:")), Serial.println(nomAppelant);
       
-    } else {smsstruct.message = String(message);}
-    if(Phone.number.length() < 8){ // numero service free renvoie sms vers Num dans liste restreinte
-      for (byte Index = 1; Index < 10; Index++) { // Balayage des Num Tel dans Phone Book
-        Phone = {"",""};
-        if(modem.readPhonebookEntry(&Phone, Index)){
-          if(Phone.number.length() > 0){
-            if (config.Pos_Pn_PB[Index] == 1) { // Num dans liste restreinte            
-              message = smsstruct.message;
-              sendSMSReply(Phone.number , true);
-              EffaceSMS(slot);
-              return; // sortir de la procedure traite_sms
-            }
-          } else {Index = 10;}
-        }
+  
+  if(Phone.number.length() < 8){ // numero service free renvoie sms vers Num dans liste restreinte
+    for (byte Index = 1; Index < 10; Index++) { // Balayage des Num Tel dans Phone Book
+      Phone = {"",""};
+      if(modem.readPhonebookEntry(&Phone, Index)){
+        if(Phone.number.length() > 0){
+          if (config.Pos_Pn_PB[Index] == 1) { // Num dans liste restreinte            
+            message = smsstruct.message;
+            sendSMSReply(Phone.number , true);
+            EffaceSMS(slot);
+            return; // sortir de la procedure traite_sms
+          }
+        } else {Index = 10;}
       }
     }
-  // }
-  // else {
-  //   smsstruct.message = String(replybuffer);
-  //   nom = F("console");
-  // }
+  }
+  } else {smsstruct.message = message;} // si mesage venant de console
   Serial.print(F("texte du SMS :")), Serial.println(smsstruct.message);
   if (sms && !(smsstruct.message.indexOf(F("MAJHEURE")) == 0)) { // suppression du SMS sauf si MAJHEURE
     EffaceSMS(slot);
@@ -1105,7 +1092,7 @@ void traite_sms(byte slot) {
     // smsstruct.message.trim();
   }
   smsstruct.message.replace(" ", "");// supp tous les espaces
-  Serial.print(F("smsstruct.message  = ")), Serial.println(smsstruct.message);
+  // Serial.print(F("smsstruct.message  = ")), Serial.println(smsstruct.message);
 
   if ((sms && nomAppelant.length() > 0) || !sms) {        // si nom appelant existant dans phone book
     // numero.toCharArray(number, numero.length() + 1); // on recupere le numéro
@@ -2183,7 +2170,7 @@ fin_tel:
       else {
         JsonObject ftpdata = doc["FTPDATA"];
         strncpy(config.ftpServeur,  ftpdata["serveur"], 26);
-        strncpy(config.ftpUser,     ftpdata["user"],    11);
+        strncpy(config.ftpUser,     ftpdata["user"],    9);
         strncpy(config.ftpPass,     ftpdata["pass"],    16);
         config.ftpPort         =    ftpdata["port"];
         sauvConfig();													// sauvegarde config
@@ -2361,8 +2348,33 @@ fin_tel:
       message += "Effacement fichier log";
       sendSMSReply(smsstruct.sendernumber, sms);
     }
+    else if (smsstruct.message.indexOf(F("CPTALATRCK")) == 0 || smsstruct.message.indexOf(F("CPTALA")) == 0) { // Compteur Ala avant Flag
+        if (smsstruct.message.indexOf(char(61)) == 10) {
+          byte c = smsstruct.message.substring(11).toInt();
+          if (c > 1 && c < 501) {
+            config.cptAla = c;
+            sauvConfig();
+          }
+        }
+        message += F("Cpt Ala Tracker (x15s)=");
+        message += String(config.cptAla);
+        message += fl;
+        sendSMSReply(smsstruct.sendernumber, sms);
+      }
+    else if (smsstruct.message.indexOf(F("SETNETWORKMODE")) >= 0) {// Set Prefered network Mode
+        if(smsstruct.message.indexOf(char(61)) == 14){
+          int mode = smsstruct.message.substring(15).toInt();
+          if(mode == 2 || mode == 13 || mode == 14 || mode == 19 || mode == 38
+          || mode == 39 || mode == 51 || mode == 54){
+            modem.setNetworkMode(mode);
+            delay(1000);
+          }
+        }
+        message += String(modem.send_AT(F("+CNMP?")));
+        sendSMSReply(smsstruct.sendernumber, sms);
+      }
     else if (smsstruct.message.indexOf(F("SENDAT")) == 0){
-      // envoie commande AT au SIM800
+      // envoie commande AT au SIM7600
       // ex: SENDAT=AT+CCLK="23/07/19,10:00:20+04" mise à l'heure
       // attention DANGEREUX pas de verification!
       if (smsstruct.message.indexOf(char(61)) == 6) {
@@ -2372,6 +2384,21 @@ fin_tel:
         message += String(reply);
         sendSMSReply(smsstruct.sendernumber, sms);
       }
+    }
+    else if (smsstruct.message.indexOf(F("MODEMINFO")) == 0){
+      // Get Modem Info
+      message += modem.getModemInfo();
+      sendSMSReply(smsstruct.sendernumber, sms);
+    }
+    else if (smsstruct.message.indexOf(F("CPTRESETMODEM")) == 0){
+      // Demande nombre de reset modem
+      message += F("Compteur reset Modem : ");
+      message += String(NbrResetModem);
+      sendSMSReply(smsstruct.sendernumber, sms);
+    }else if (smsstruct.message.indexOf(F("NETWORKHISTO")) == 0){
+      // Demande Changement etat reseau
+      message_Monitoring_Reseau();
+      sendSMSReply(smsstruct.sendernumber, sms);
     }
     else if (smsstruct.message.indexOf(F("TYPEBATT")) == 0){ // Type Batterie
       if (smsstruct.message.indexOf(char(61)) == 8) {
@@ -4585,8 +4612,11 @@ void interpretemessage(String demande) {
   String bidons;
   //demande.toUpperCase();
   if (demande.indexOf(char(61)) == 0) {
-    bidons = demande.substring(1);
-    bidons.toCharArray(replybuffer, bidons.length() + 1);
+    // Serial.print("message console:"),Serial.println(demande);
+    message = demande.substring(1);
+    // bidons = demande.substring(1);
+    // bidons.toCharArray(replybuffer, bidons.length() + 1);
+    // Serial.print("message console:"),Serial.println(message);
     traite_sms(99);//	traitement SMS en mode test local
   }
 }
