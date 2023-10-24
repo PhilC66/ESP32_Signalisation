@@ -9,8 +9,7 @@
             "includePath": [
                 "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\tools\\**",
                 "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\**",
-                "${workspaceFolder}/**",
-                "F:\\Documents\\Arduino\\**"
+                "${workspaceFolder}/**"
             ],
             "forcedInclude": [],
             "cStandard": "c11",

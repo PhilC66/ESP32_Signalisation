@@ -69,15 +69,14 @@
   ok passer ESP32 V2.0.11 Attention Wifi ne fonctionne pas avec ssid comportant _ underscrore
   ok passer à nouvelle version SPIFFS LittelFs
   ok remplacer EEPROM par file https://arduino.stackexchange.com/questions/90204/how-to-store-a-struct-in-a-file
-  augmenter moyennage lors de la mesure tension calibration
-  passer en 4G
-  envoyer/recevoir message en SMS ou SMS+MQTT
-  upload log https://forum.arduino.cc/t/ftp-upload-sim7600/931213/2
+  ok passer en 4G
+  ok envoyer/recevoir message en SMS ou SMS+MQTT
+  ok upload log https://forum.arduino.cc/t/ftp-upload-sim7600/931213/2
+  ok autoupload parametre auto upload fichier log.txt en FTP
 
-  V3-01 16/10/2023
-  compilation ok en 4G sms seulement, pas de upload log
+  V3-01 24/10/2023 Upload ne fonctionne pas
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.11
-  Arduino IDE 1.8.19 : 1085133 82%, 54784 167% sur PC
+  Arduino IDE 1.8.19 : 1100977 83%, 54848 16% sur PC
   Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
 
   V3-0 10/10/2023
@@ -92,7 +91,7 @@
 #include <Arduino.h>
 
 String ver        = "V3-01";
-int    Magique    = 2;
+int    Magique    = 3;
 
 #define TINY_GSM_MODEM_SIM7600
 
@@ -172,7 +171,6 @@ String message;
 String bufferrcpt;
 String fl = "\n";                   //  saut de ligne SMS
 String Id ;                         //  Id du materiel sera lu dans config
-// char   SIM800InBuffer[64];          //  for notifications from the SIM800
 char   replybuffer[255];            //  Buffer de reponse SIM800
 bool Allume  = false;
 byte BlcPwmChanel = 0;
@@ -209,7 +207,7 @@ bool FlagLastAlarmeMQTT = false;
 bool FlagAlarmeGps      = false;
 bool AlarmeGps          = false;
 bool FlagLastAlarmeGps  = false;
-bool lancement          = false;    // passe a true apres lancement
+// bool lancement          = false;    // passe a true apres lancement
 String Memo_Demande_Feux[3]={"","",""};  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4,V7)
 bool FlagDemande_Feux = false;   // si demande encours = true
 
@@ -282,6 +280,7 @@ struct  config_t           // Structure configuration sauvée dans file config
   int     hete;            // decalage Heure été UTC
   int     hhiver;          // decalage Heure hiver UTC
   bool    messageMode;     // false = sms,true=sms+mqtt pour message generé automatiquement
+  bool    autoupload;      // Upload automatique du fichier log
 } ;
 config_t config;
 int N_Y, N_M, N_D, N_H, N_m, N_S; // variable Date/Time temporaire
@@ -322,7 +321,7 @@ void setup() {
     Serial.println(F("LittleFS initialised... file access enabled..."));
     LittleFS_present = true;
   }
-  LittleFS.remove("/somefile.txt");
+  
   pinMode(PinIp1     , INPUT_PULLUP);
   pinMode(PinIp2     , INPUT_PULLUP);
   pinMode(PinFBlc    , OUTPUT);
@@ -350,11 +349,11 @@ void setup() {
 
   if (gsm) {
     Serial.println("lancement SIM7600");
-    // Set GSM module baud rate
+    // Set GSM module baud rate valeur par defaut usine = 115200
     // pour nouvelle carte avant premiere utilisation faire AT+IPREX=38400
     // certaine cde comme ATI modeminfo ne fonctionne pas à 115200(val defaut usine),
     // Ok à 57600, on garde une marge un cran en dessous = 38400 
-    SerialAT.begin(38400, SERIAL_8N1, RX_PIN, TX_PIN);
+    SerialAT.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN); // fonctionne avec 115200
     Serial.println(F("Initializing modem..."));
     unsigned long debut = millis();
     while(!modem.init()){
@@ -408,6 +407,7 @@ void setup() {
     config.hete          = 2; // heure
     config.hhiver        = 1; // heure
     config.messageMode   = false; // SMS
+    config.autoupload    = true;
     config.cptAla        = 10; // 11*Acquisition time
     for (int i = 0; i < 10; i++) {// initialise liste PhoneBook liste restreinte
       config.Pos_Pn_PB[i] = 0;
@@ -603,21 +603,7 @@ void loop() {
     }
   }
   if(gsm && config.messageMode == 1){  //config.messageMode = SMS+MQTT
-    // Make sure we're still registered on the network
-    // ne fonctionne pas si modem bloqué CGREG = 4
-    // if (!modem.isNetworkConnected()) { // CGREG GPRS network registration status
-    //   Serial.println(F("Network disconnected"));
-    //   if (!modem.waitForNetwork(180000L, true)) {
-    //     Serial.println(F(" fail"));
-    //     // delay(10000);
-    //     // return;
-    //   }
-    //   if (modem.isNetworkConnected()) {
-    //     Serial.println(F("Network re-connected"));
-    //   }
-    // }
-
-    // and make sure GPRS/EPS is still connected
+    // make sure GPRS/EPS is still connected
     if (!modem.isGprsConnected()) { // NETOPEN? Start TCPIP service
       Serial.println(F("GPRS disconnected!"));
       Serial.print(F("Connecting to "));
@@ -645,8 +631,6 @@ void loop() {
           AlarmeMQTT = false;
           }
       }
-      // delay(100);
-      // return;
     }
     mqtt.loop();
   }
@@ -655,7 +639,6 @@ void loop() {
   VerifTaquet_2(); // si Cv65 Taquet V3
 //*************** Verification commande Feu Blanc ***************
   if (Allume) VerifCdeFBlc();
-
   ArduinoOTA.handle();
   Alarm.delay(0);
 
@@ -834,7 +817,7 @@ void Acquisition() {
     FlagReset = false;
     ResetHard();				//	reset hard
   }
-  if(gsm && config.messageMode == true && lancement){  //config.messageMode = SMS+MQTT
+  if(gsm && config.messageMode == true && firstdecision){  //config.messageMode = SMS+MQTT
     static byte nalaGprs = 0;
     static byte nalaGps  = 0;
     static byte nalaMQTT = 0;
@@ -1088,7 +1071,10 @@ void traite_sms(byte slot) {
   static bool FlagCalibration = false;	// Calibration Tension en cours
 
   // if (slot == 99) sms = false;
-  if (slot == 255) smsserveur = true;
+  if (slot == 255){
+    smsserveur = true;
+    nomAppelant = "serveur_MQTT";
+  }
   // /* Retrieve SMS sender address/phone number. */
   if (slot < 99) {
     if (!modem.readSMS(&smsstruct,slot)){
@@ -2206,29 +2192,25 @@ fin_tel:
       message += fl;
       sendSMSReply(smsstruct.sendernumber, slot);
     }
-    else if (gsm && smsstruct.message.indexOf(F("UPLOADLOG")) == 0) {//upload log
-      Serial.println("A faire");
-      // message += F("lancement upload log");
-      // message += fl;
-      // MajLog(nomAppelant, "upload log");// renseigne log
-      // Sbidon = String(config.apn);
-      // Sim800.activateBearerProfile(config.apn); // ouverture GPRS
+    else if (gsm && smsstruct.message.indexOf(F("UPLOADLOG")) == 0) {//upload log sur demande
+      message += F("lancement upload log");
+      message += fl;
+      MajLog(nomAppelant, "upload log");// renseigne log
+      Serial.println(F("Starting..."));
+      byte reply = FTP_upload_function(filelog); // Upload fichier
+      Serial.println("The end... Response: " + String(reply));
 
-      // Serial.println(F("Starting..."));
-      // int reply = gprs_upload_function (); // Upload fichier
-      // Serial.println("The end... Response: " + String(reply));
-
-      // if(reply == 0){
-      //   message += F("upload OK");
-      //   LittleFS.remove(filelog);  // efface fichier log
-      //   MajLog(nomAppelant, "");         // nouveau log
-      //   MajLog(nomAppelant, F("upload OK"));// renseigne nouveau log
-      // } else{
-      //   message += F("upload fail");
-      //   MajLog(nomAppelant, F("upload fail"));// renseigne log
-      // }
+      if(reply == true){
+        message += F("upload OK");
+        LittleFS.remove(filelog);  // efface fichier log
+        MajLog(nomAppelant, "");         // nouveau log
+        MajLog(nomAppelant, F("upload OK"));// renseigne nouveau log
+      } else {
+        message += F("upload fail");
+        MajLog(nomAppelant, F("upload fail"));// renseigne log
+      }
       // Sim800.deactivateBearerProfile(); // fermeture GPRS
-      // sendSMSReply(smsstruct.sendernumber, slot);
+      sendSMSReply(smsstruct.sendernumber, slot);
     }
     else if (smsstruct.message.indexOf("FTPDATA") > -1) {
     // Parametres FTPDATA=Serveur:User:Pass:port
@@ -2483,6 +2465,18 @@ fin_tel:
       message += "Effacement fichier log";
       sendSMSReply(smsstruct.sendernumber, slot);
     }
+    else if (smsstruct.message == "AUTOUPLOAD"){ // Auto upload log vers serveur FTP
+      if (smsstruct.message.indexOf(char(61)) == 10) {
+        byte c = smsstruct.message.substring(11).toInt();
+        if(c==0 || c==1){
+          config.autoupload = c;
+          sauvConfig();
+        }
+        message += "Autoupload:";
+        message += String(config.autoupload);
+        sendSMSReply(smsstruct.sendernumber, slot);
+      }
+    }
     else if (smsstruct.message.indexOf(F("CPTALATRCK")) == 0 || smsstruct.message.indexOf(F("CPTALA")) == 0) { // Compteur Ala avant Flag
         if (smsstruct.message.indexOf(char(61)) == 10) {
           byte c = smsstruct.message.substring(11).toInt();
@@ -2636,7 +2630,10 @@ void envoieGroupeSMS(byte grp, bool vie) {
       message_Monitoring_Reseau();
     }
     // if (grp == 3) n = 1; // limite la liste à ligne 1
-    if(config.messageMode) Envoyer_MQTT();
+    if(config.messageMode){
+      Envoyer_MQTT();
+      return;
+    }
     for (byte Index = 1; Index < 10; Index++) {		// Balayage du PB
       Phone = {"",""};      
       if(modem.readPhonebookEntry(&Phone, Index)){
@@ -3143,13 +3140,23 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en LittleFS
       messageId();
       message += F("Fichier log plein\n");
       message += String(f.size());
-      message += F("\nFichier efface");
+      if(config.autoupload){
+        message += F("\nFichier upload vers serveur ");
+        if(FTP_upload_function(filelog)){
+          message += ("OK");
+        } else {
+          message += ("KO");
+        }
+      } else {
+        message += F("\nFichier efface");
+      }
       if (gsm) {
         Phone = {"",""};
         if(modem.readPhonebookEntry(&Phone, 1)){ // envoyé au premier num seulement
           sendSMSReply(Phone.number, true);          
         }
       }
+      f.close();
       LittleFS.remove(filelog);
       FileLogOnce = false;
     }
@@ -3164,13 +3171,19 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en LittleFS
     Serial.println(Cbidon);
     appendFile(LittleFS, filelog, Cbidon);
   }
-  else{ // fichier n'existe pas, création fichier avec pr mière ligne date et Id
+  else{ // fichier n'existe pas, création fichier avec première ligne date et Id
     char Cbidon[101]; // 100 char maxi
     sprintf(Cbidon, "%02d/%02d/%4d %02d:%02d:%02d;", day(), month(), year(), hour(), minute(), second());
     strcat(Cbidon,config.Idchar);
     strcat(Cbidon,fl.c_str());
     appendFile(LittleFS, filelog, Cbidon);
     Serial.print("nouveau fichier log:"),Serial.println(Cbidon);
+    sprintf(Cbidon, "%02d/%02d/%4d %02d:%02d:%02d", day(), month(), year(), hour(), minute(), second());
+    Id = ";" + Id + ";";
+    Raison += "\n";
+    strcat(Cbidon, Id.c_str());
+    strcat(Cbidon, Raison.c_str());
+    appendFile(LittleFS, filelog, Cbidon);
   }
 }
 //---------------------------------------------------------------------------
@@ -3350,6 +3363,7 @@ void PrintConfig() {
   Serial.print(F("msg Mode 0SMS,1SMS+MQTT = ")) , Serial.println(config.messageMode);
   Serial.print(F("declage Heure ete = "))       , Serial.println(config.hete);
   Serial.print(F("declage Heure hiver = "))     , Serial.println(config.hhiver);
+  Serial.print(F("autoupload = "))              , Serial.println(config.autoupload);
 }
 //---------------------------------------------------------------------------
 void ConnexionWifi(char* ssid, char* pwd, String number, int slot) {
@@ -3976,6 +3990,70 @@ void HomePage() {
   webpage += F("<td>");	webpage += String(config.ftpPass);	webpage += F("</td>");
   webpage += F("</tr>");
 
+  webpage += F("<tr>");
+  webpage += F("<td>mqtt serveur</td>");
+  webpage += F("<td>");	webpage += String(config.mqttServer);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>mqtt port</td>");
+  webpage += F("<td>");	webpage += String(config.mqttPort);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>mqtt username</td>");
+  webpage += F("<td>");	webpage += String(config.mqttUserName);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>mqtt pass</td>");
+  webpage += F("<td>");	webpage += String(config.mqttPass);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>send topic</td>");
+  webpage += F("<td>");	webpage += String(config.sendTopic);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>receive topic</td>");
+  webpage += F("<td>");	webpage += String(config.receiveTopic);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>mpermanent topic</td>");
+  webpage += F("<td>");	webpage += String(config.permanentTopic);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>msg Mode 0SMS,1SMS+MQTT</td>");
+  webpage += F("<td>");	webpage += String(config.messageMode);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>declage Heure ete</td>");
+  webpage += F("<td>");	webpage += String(config.hete);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>declage Heure hiver</td>");
+  webpage += F("<td>");	webpage += String(config.hhiver);	webpage += F("</td>");
+  webpage += F("</tr>");
+  webpage += F("</table><br>");
+
+  webpage += F("<tr>");
+  webpage += F("<td>autoupload</td>");
+  webpage += F("<td>");	webpage += String(config.autoupload);	webpage += F("</td>");
+  webpage += F("</tr>");
   webpage += F("</table><br>");
 
   webpage += F("<a href='/download'><button>Download</button></a>");
@@ -4306,135 +4384,127 @@ void handleDateTime() { // getion Date et heure page web
   server.send(200, "text/plane", String(time_str)); //Send Time value only to client ajax request
 }
 //---------------------------------------------------------------------------
-byte gprs_upload_function (){
-  // https://forum.arduino.cc/index.php?topic=376911.15
-  int buffer_space = 1000;
-  UploadFile = LittleFS.open(filelog, "r");
-  byte reply = 1;
-  int i = 0;
-  // ne fonctionne pas dans tous les cas ex roaming
-  // while (i < 10 && reply == 1){ //Try 10 times...
-    // reply = sendATcommand("AT+CREG?","+CREG: 0,1","ERROR", 1000);
-    // i++;
-    // delay(1000);
-  // }
-  reply = 0;
-if (reply == 0){ // ouverture GPRS
-// reply = sendATcommand("AT+SAPBR=3,1,\"CONTYPE\",\"GPRS\"","OK","ERROR", 1000);
-if (reply == 0){
-// reply = sendATcommand("AT+SAPBR=3,1,\"APN\",\"sl2sfr\"", "OK", "ERROR", 1000);//Replace with your APN
-if (reply == 0){
-//reply = sendATcommand("AT+SAPBR=3,1,\"USER\",\"entelpcs\"", "OK", "ERROR", 1000);
-if (reply == 0){
-//reply = sendATcommand("AT+SAPBR=3,1,\"PWD\",\"entelpcs\"", "OK", "ERROR", 1000);
-if (reply == 0){
-reply = 2;
-i = 0;
-while (i < 3 && reply == 2){ //Try 3 times...
-  reply = sendATcommand("AT+SAPBR=1,1", "OK", "ERROR", 10000);
-  if (reply == 2){
-    sendATcommand("AT+SAPBR=0,1", "OK", "ERROR", 10000);
+byte FTP_upload_function (char *file2upload){
+  Serial.print("file to upload:"),Serial.println(file2upload);
+  String tosend = "";
+  // copie fichier log.txt vers EFS sur modem SIM7600
+  sendAT("AT","OK","ERROR",1000);
+  // Selection e:
+  Sbidon = sendAT("AT+FSCD=E:","OK","ERROR",1000);
+  if(Sbidon.indexOf("+FSCD: E:")>-1){
+    Serial.println("Select e: OK");
+  } else {
+    Serial.println("Select e: KO");
+    return false;
   }
-  i++;
-}
-if (reply == 0){
-reply = sendATcommand("AT+SAPBR=2,1", "OK", "ERROR", 1000);
-if (reply == 0){
-reply = sendATcommand("AT+FTPCID=1", "OK", "ERROR", 1000);
-if (reply == 0){
-reply = sendATcommand("AT+FTPSERV=\"" + String(config.ftpServeur) + "\"", "OK", "ERROR", 1000);//replace ftp.sample.com with your server address
-if (reply == 0){
-reply = sendATcommand("AT+FTPPORT="+ String(config.ftpPort), "OK", "ERROR", 1000);
-if (reply == 0){
-reply = sendATcommand("AT+FTPUN=\"" + String(config.ftpUser) + "\"", "OK", "ERROR", 1000);//Replace 1234@sample.com with your username
-if (reply == 0){
-reply = sendATcommand("AT+FTPPW=\"" + String(config.ftpPass) + "\"", "OK", "ERROR", 1000);//Replace 12345 with your password
-if (reply == 0){
-reply = sendATcommand("AT+FTPPUTNAME=\"" + String(filelog) + "\"", "OK", "ERROR", 1000);
-if (reply == 0){
-  reply = sendATcommand("AT+FTPPUTPATH=\"/" + String(config.Idchar) + "/\"", "OK", "ERROR", 1000);// repertoire "/Id/"
-if (reply == 0){
-  unsigned int ptime = millis();
-  reply = sendATcommand("AT+FTPPUT=1", "+FTPPUT: 1,1", "+FTPPUT: 1,6", 60000);
-  Serial.println("Time: " + String(millis() - ptime));
-  if (reply == 0){
-    if (UploadFile) {
-      int i = 0;
-      unsigned int ptime = millis();
-      long archivosize = UploadFile.size();
-      while (UploadFile.available()) {
-        while(archivosize >= buffer_space){
-          reply = sendATcommand("AT+FTPPUT=2," + String(buffer_space), "+FTPPUT: 2,1", "OK", 3000);
-            if (reply == 0) { //This loop checks for positive reply to upload bytes and in case or error it retries to upload
-              Serial.println("Remaining Characters: " + String(UploadFile.available()));
-              for(int d = 0; d < buffer_space; d++){
-                Serial2.write(UploadFile.read());
-                archivosize -= 1;
-              }
-            }
-            else {
-              Serial.println("Error while sending data:");
-              reply = 1;
-            }
-        }
-        if (sendATcommand("AT+FTPPUT=2," + String(archivosize), "+FTPPUT: 2," + String(archivosize), "ERROR", 10000) == 0) {
-          for(int t = 0; t < archivosize; t++){
-            Serial2.write(UploadFile.read());
-          }
-        }
-      }
-    UploadFile.close();
-    Serial.println("Time: " + String(millis() - ptime));
-    }
+  // copie file2upload dans e:
+  File f = LittleFS.open(file2upload, "r");
+  tosend = "AT+CFTRANRX=\"E:"+String(file2upload)+"\"," +String(f.size());
+  Serial.print("copy file :"), Serial.println(tosend);
+  Sbidon = sendAT(tosend,">","ERROR",1000);
+  while (f.available()){
+    SerialAT.write(f.read());
   }
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
-}
-  sendATcommand("AT+SAPBR=0,1", "OK", "ERROR", 10000); // fermeture GPRS
-return reply;
+  f.close();
+  delay(100);
+  // verification file2upload dans e:
+  Sbidon = sendAT("AT+FSLS","OK","ERROR",1000);
+  Serial.print("List FS Directory"), Serial.println(Sbidon);
+  if(Sbidon.indexOf(String(file2upload).substring(1))>-1){// apres le / de debut
+    Serial.println("write file to e: OK");
+  } else {
+    Serial.println("write file to e: KO");
+    return false;
+  }
+  // Envoyer fichier par FTP
+  sendAT("AT","OK","ERROR",1000);
+  // Start FTP
+  Sbidon = sendAT("AT+CFTPSSTART","OK","ERROR",1000);
+  Serial.print("FTP Start :"), Serial.println(Sbidon);
+  if(Sbidon.indexOf("+CFTPSSTART: 0")>-1){
+    Serial.println("FTP Start OK");
+  } else {
+    Serial.println("FTP Start KO");
+    return false;
+  }
+  // Login FTP
+  tosend = "AT+CFTPSLOGIN=\"" + String(config.ftpServeur) + "\","+ String(config.ftpPort)+ ",\""+ String(config.ftpUser)+ "\",\""+ String(config.ftpPass)+ "\",0";
+  Serial.print("FTP login :"), Serial.println(tosend);
+  Sbidon = sendAT(tosend,"+CFTPSLOGIN","ERROR",10000);
+  Serial.print("FTP login :"), Serial.println(Sbidon);
+  if(Sbidon.indexOf("+CFTPSLOGIN: 0")>-1){
+    Serial.println("FTP login OK");
+  } else {
+    Serial.println("FTP login KO");// sortir
+    sendAT("AT+CFTPSSTOP","OK","ERROR",1000);
+    return false;
+  }
+  // Upload du fichier
+  tosend = "AT+CFTPSPUTFILE=\"" + Id + String(file2upload) + "\",3"; // 3 pour E:
+  Serial.print("FTP Upload :"), Serial.println(tosend);
+  Sbidon = sendAT(tosend,"OK","ERROR",10000);
+  Serial.print("FTP Upload :"), Serial.println(Sbidon);
+  if(Sbidon.indexOf("+CFTPSPUTFILE: 0")>-1){
+    Serial.println("Upload OK");
+  } else {
+    Serial.println("Upload KO");// sortir
+    sendAT("AT+CFTPSLOGOUT","OK","ERROR",1000);
+    sendAT("AT+CFTPSSTOP","OK","ERROR",1000);
+    return false;
+  }
+  delay(500);
+  tosend = "AT+CFTPSLIST=\"" + Id + "\"";
+  Sbidon = sendAT(tosend,"+CFTPSLIST","ERROR",10000);
+  Serial.print("FTP Dir :"), Serial.println(Sbidon);
+  if(Sbidon.indexOf(String(file2upload).substring(1))>-1){// apres le / de debut
+    Serial.println("fichier uploader avec succes");
+  } else {
+    Serial.println("fichier uploader avec erreur");
+    sendAT("AT+CFTPSLOGOUT","OK","ERROR",1000);
+    sendAT("AT+CFTPSSTOP","OK","ERROR",1000);
+    return false;
+  }
+  Sbidon = sendAT("AT+CFTPSLOGOUT","OK","ERROR",1000);
+  Serial.print("FTP logout :"), Serial.println(Sbidon);
+  Sbidon = sendAT("AT+CFTPSSTOP","OK","ERROR",1000);
+  Serial.print("FTP Stop :"), Serial.println(Sbidon);
+  // Suppression du fichier dans EFS
+  tosend = "AT+FSDEL=" + String(file2upload);
+  Sbidon = sendAT(tosend,"OK","ERROR",1000);
+  Serial.print("Suppression fichier en e: :"), Serial.println(Sbidon);
+  return true;
 }
 //---------------------------------------------------------------------------
-byte sendATcommand(String ATcommand, String answer1, String answer2, unsigned int timeout){
-  byte reply = 1;
-  String content = "";
-  char character;
+// byte sendATcommand(String ATcommand, String answer1, String answer2, unsigned int timeout){
+//   byte reply = 1;
+//   String content = "";
+//   char character;
 
-  //Clean the modem input buffer
-  while(Serial2.available()>0) Serial2.read();
+//   //Clean the modem input buffer
+//   while(Serial2.available()>0) Serial2.read();
 
-  //Send the atcommand to the modem
-  Serial2.println(ATcommand);
-  delay(100);
-  unsigned int timeprevious = millis();
-  while((reply == 1) && ((millis() - timeprevious) < timeout)){
-    while(Serial2.available()>0) {
-      character = Serial2.read();
-      content.concat(character);
-      Serial.print(character);
-      delay(10);
-    }
-    //Stop reading conditions
-    if (content.indexOf(answer1) != -1){
-      reply = 0;
-    }else if(content.indexOf(answer2) != -1){
-      reply = 2;
-    }else{
-      //Nothing to do...
-    }
-  }
-  return reply;
-}
+//   //Send the atcommand to the modem
+//   Serial2.println(ATcommand);
+//   delay(100);
+//   unsigned int timeprevious = millis();
+//   while((reply == 1) && ((millis() - timeprevious) < timeout)){
+//     while(Serial2.available()>0) {
+//       character = Serial2.read();
+//       content.concat(character);
+//       Serial.print(character);
+//       delay(10);
+//     }
+//     //Stop reading conditions
+//     if (content.indexOf(answer1) != -1){
+//       reply = 0;
+//     }else if(content.indexOf(answer2) != -1){
+//       reply = 2;
+//     }else{
+//       //Nothing to do...
+//     }
+//   }
+//   return reply;
+// }
 //---------------------------------------------------------------------------
 String sendAT(String ATcommand, String answer1, String answer2, unsigned int timeout){
   byte reply = 1;
@@ -4471,12 +4541,12 @@ void VerifCdeFBlc(){
   int periodemesures = 2000;
   if(Feux != 2){
     if(millis()- tmesure > periodemesures){// periode mesure > periodemesures
-      if(compteurmesureres > 1200){
+      if(compteurmesureres > 25){// >1200
         // pour eviter fausses alarmes quand proc occupé par ailleurs
         Serial.print("Cpt Cde FBLc:"),Serial.print(compteurmesureres);
         Serial.print(", accu:"),Serial.print(accumesureres);
         Serial.print(", %:"),Serial.println((float)accumesureres/compteurmesureres);
-        if((float)accumesureres/compteurmesureres < .35 ){// .5 = M, .75 = S
+        if((float)accumesureres/compteurmesureres < .35 ){// .35, .5 = M, .75 = S
           Serial.println("Alarme Cde Feu Blanc");
           FlagAlarmeCdeFBlc = true;
           if(!FlagLastAlarmeCdeFBlc){ // si premiere fois
