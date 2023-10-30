@@ -9,3 +9,4 @@ defs.h
 
 .pio
 /.vscode
+/build

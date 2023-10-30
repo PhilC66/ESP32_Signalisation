@@ -34,7 +34,7 @@
   en fin de journée retour sleep jusqu'a debut
 
   si non circulé,
-  retour SIM800 et ESP32 en sleep reveil toute les heures
+  retour SIM7600 et ESP32 en sleep reveil toute les heures
   au reveil attendre au moins 30s pour que les SMS arrivent,
   quand plus de SMS et traitement retour sleep 1H00
 
@@ -73,10 +73,19 @@
   ok envoyer/recevoir message en SMS ou SMS+MQTT
   ok upload log https://forum.arduino.cc/t/ftp-upload-sim7600/931213/2
   ok autoupload parametre auto upload fichier log.txt en FTP
+  ok wifi ssid augmenté nbr caracteres à 25 et pass à 30
+  ok gestion sleep modem CFUN=0, CFUN=1 au lancement
+  
+  à tester softupdate par Raspi
+  decider et tester reset modem et powerkey?
+  powerkey pulldown hard par defaut sur carte modem
+  ajouter dans ResetHard un +CRESET ou
+  utiliser powerkey au démarrage
 
-  V3-01 24/10/2023 Upload ne fonctionne pas
+
+  V3-02 30/10/2023 OK pour test
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.11
-  Arduino IDE 1.8.19 : 1100977 83%, 54848 16% sur PC
+  Arduino IDE 1.8.19 : 1101293 84%, 54848 16% sur PC
   Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
 
   V3-0 10/10/2023
@@ -90,7 +99,7 @@
 
 #include <Arduino.h>
 
-String ver        = "V3-01";
+String ver        = "V3-02";
 int    Magique    = 3;
 
 #define TINY_GSM_MODEM_SIM7600
@@ -101,7 +110,7 @@ int    Magique    = 3;
 #include <PubSubClient.h>          // modifié define MQTT_MAX_PACKET_SIZE 164
 #include <Time.h>
 #include <TimeAlarms.h>
-#include <sys/time.h>             //<sys/time.h>
+// #include <sys/time.h>             //<sys/time.h>
 #include <WiFi.h>
 #include <LittleFS.h>
 #include <ArduinoOTA.h>
@@ -171,7 +180,7 @@ String message;
 String bufferrcpt;
 String fl = "\n";                   //  saut de ligne SMS
 String Id ;                         //  Id du materiel sera lu dans config
-char   replybuffer[255];            //  Buffer de reponse SIM800
+char   replybuffer[255];            //  Buffer de reponse SIM7600
 bool Allume  = false;
 byte BlcPwmChanel = 0;
 byte VltPwmChanel = 1;
@@ -357,6 +366,7 @@ void setup() {
     Serial.println(F("Initializing modem..."));
     unsigned long debut = millis();
     while(!modem.init()){
+      modem.setPhoneFunctionality(1);// CFUN=1 full functionality, online mode
       delay(1000);
       if(millis() - debut > 60000) break;
     }
@@ -378,8 +388,6 @@ void setup() {
   ADC.attach_ms(100, adc_read); // lecture des adc toute les 100ms
   /* Lecture configuration file config	 */
   readConfig(); // Lecture de la config
-  // readFile(LittleFS,filelog);      // Lecture des log
-  // Alarm.delay(500);
   if (config.magic != Magique) {
     /* verification numero magique si different
     		erreur lecture fileconfig ou carte vierge
@@ -481,7 +489,6 @@ void setup() {
   OuvrirLumLUT();             // ouvre le fichier lumLUT en LittleFS
   // Serial.print(F("temps =")),Serial.println(millis());
   if (gsm) {
-    // Sim800.reset(SIMPIN);					// lancer SIM800
     Serial.print(("Waiting for network..."));
     if (!modem.waitForNetwork()) {
       Serial.println(F(" fail"));
@@ -582,7 +589,7 @@ void loop() {
           interrupt+=c;   
       }
       timerEnd = millis();
-      if(timerEnd - timerStart > 1500){
+      if(timerEnd - timerStart > 1500){//1500
       Serial.print("unsolicited message:"),Serial.println(interrupt);
       if (interrupt.indexOf(F("CMTI")) >= 0 ) { // reception SMS
         int p = interrupt.indexOf(","); // cherche numero de slot apres la virgule
@@ -634,10 +641,10 @@ void loop() {
     }
     mqtt.loop();
   }
-//*************** Verification position taquet ***************
+  //*************** Verification position taquet ***************
   VerifTaquet_1(); // si Cv65 Taquet Vp
   VerifTaquet_2(); // si Cv65 Taquet V3
-//*************** Verification commande Feu Blanc ***************
+  //*************** Verification commande Feu Blanc ***************
   if (Allume) VerifCdeFBlc();
   ArduinoOTA.handle();
   Alarm.delay(0);
@@ -1168,8 +1175,8 @@ void traite_sms(byte slot) {
       byte pos2 = smsstruct.message.indexOf(char(44), pos1 + 1);
       String ssids = smsstruct.message.substring(pos1 + 1, pos2);
       String pwds  = smsstruct.message.substring(pos2 + 1, smsstruct.message.length());
-      char ssid[20];
-      char pwd[20];
+      char ssid[25];
+      char pwd[30];
       ssids.toCharArray(ssid, ssids.length() + 1);
       ssids.toCharArray(ssid, ssids.length() + 1);
       pwds.toCharArray(pwd, pwds.length() + 1);
@@ -1294,8 +1301,6 @@ fin_tel:
 
         read_RSSI();														// info RSSI seront ajoutées à message
         
-        // int Vbat = modem.getBattVoltage();//Sim800.BattVoltage();
-        // byte Batp = 0;//Sim800.BattPct();
         message += F("Batt GSM : ");
         message += String(modem.getBattVoltage());
         message += F(" mV, ");
@@ -1808,7 +1813,7 @@ fin_tel:
           recoit message "CALIBRATION=1250" mesure réelle en V*100
           calcul nouveau coeff = mesure reelle/resultat stocké * CoeffTensionDefaut
           applique nouveau coeff
-          stock en EEPROM
+          stock en LittleFS
           sort du mode calibration
 
           variables
@@ -2209,12 +2214,11 @@ fin_tel:
         message += F("upload fail");
         MajLog(nomAppelant, F("upload fail"));// renseigne log
       }
-      // Sim800.deactivateBearerProfile(); // fermeture GPRS
       sendSMSReply(smsstruct.sendernumber, slot);
     }
     else if (smsstruct.message.indexOf("FTPDATA") > -1) {
     // Parametres FTPDATA=Serveur:User:Pass:port
-    // {"FTPDATA":{"serveur":"dd.org","user":"user","pass":"pass",,"port":00}}
+    // {"FTPDATA":{"serveur":"dd.org","user":"user","pass":"pass","port":00}}
     bool erreur = false;
     bool formatsms = false;
     if (smsstruct.message.indexOf(":") == 10) { // format json
@@ -2303,6 +2307,7 @@ fin_tel:
     }
     else if (smsstruct.message.indexOf("MQTTDATA") > -1) {
       // Parametres MQTTDATA=serveur:user:pass:port:permanent_topic:send_topic:receive_topic
+      // {"MQTTDATA":{"serveur":"xxxx.org","user":"uuu","pass":"passpass","port":9999,"permanent_topic":"CV65/permanent","send_topic":"Signalisation/input","receive_topic":"CV65/output"}}
 
       bool erreur = false;
       bool formatsms = false;
@@ -2326,7 +2331,7 @@ fin_tel:
       }
       
       if (!erreur) {
-        DynamicJsonDocument doc(256);
+        DynamicJsonDocument doc(384);
         JsonObject MQTTDATA = doc.createNestedObject("MQTTDATA");
         MQTTDATA["serveur"] = config.mqttServer;
         MQTTDATA["user"]    = config.mqttUserName;
@@ -2547,14 +2552,17 @@ fin_tel:
       if (smsstruct.message.indexOf(char(61)) == 11) {
         int i = atoi(smsstruct.message.substring(12).c_str());
         if (i == 0  || i == 1){
-          if(i == 1 && config.messageMode == 0){ // activer GPRS
+          if(i == 1 && config.messageMode == 1){ // MQTT activer GPRS
             ConnectGPRS();
-          } else if(i == 0 && config.messageMode == 1) { // desactiver GPRS
+          } else if(i == 0 && config.messageMode == 0) { // SMS desactiver GPRS
             mqtt.disconnect();
             modem.gprsDisconnect();
           }
           config.messageMode = i;
           sauvConfig();													// sauvegarde config
+          Sbidon = F("messagemode=");
+          Sbidon += String(config.messageMode);
+          MajLog(nomAppelant, Sbidon);// renseigne log
         }
       }
       message += "Message mode : ";
@@ -2621,7 +2629,8 @@ void envoieGroupeSMS(byte grp, bool vie) {
       de la liste restreinte config.Pos_Pn_PB[x]=1
       si grp = 3,
       Message au Serveur seulement N°1 de la liste			
-      vie = true, ajoute au message nombre de reset modem */
+      vie = true, ajoute au message nombre de reset modem
+      et envoie sms y compris si messageMode = 1 */
     generationMessage();
     if(vie){
       message += F("Reset modem : ");
@@ -2629,39 +2638,39 @@ void envoieGroupeSMS(byte grp, bool vie) {
       message += fl;
       message_Monitoring_Reseau();
     }
-    // if (grp == 3) n = 1; // limite la liste à ligne 1
-    if(config.messageMode){
-      Envoyer_MQTT();
-      return;
-    }
     for (byte Index = 1; Index < 10; Index++) {		// Balayage du PB
       Phone = {"",""};      
       if(modem.readPhonebookEntry(&Phone, Index)){
+        // Serial.print("groupe:"),Serial.println(grp);
+        // Serial.print("Index:"),Serial.println(Index);
+        // Serial.print("PB name:"),Serial.println(Phone.text);
         if(Phone.number.length() > 0){
-          if ((grp == 3) || (grp == 0)){
-            sendSMSReply(Phone.number, true);
-            if(grp == 3){
-              return; // terminé serveur seulement
+          if (grp == 3){ // Serveur
+            if(Index == 1 && config.messageMode == 1){ // Serveur et MQTT
+              Envoyer_MQTT();
+            } else { // SMS
+              sendSMSReply(Phone.number, true);
             }
+            break; // Sortir, Serveur seulement
+          } else if (grp == 0){ // tous SMS
+            sendSMSReply(Phone.number, true);
           } else if (grp == 1) { // liste restreinte seulement
             for (byte Index2 = 1; Index2 <10;Index2 ++){		// Balayage des Num Tel Autorisés=1 dans Phone Book
-              Serial.print(Index),Serial.print(","),Serial.println(Phone.number);            
+              // Serial.print(Index),Serial.print(","),Serial.println(Phone.number);            
               if (config.Pos_Pn_PB[Index2] == 1){          
                 sendSMSReply(Phone.number, true);
               }
             }
           }
         } else {
-          Index = 10;
-        }        
+          break;
+        }
       }
-    }
+    }    
   }
 }
 //---------------------------------------------------------------------------
 void generationMessage() {
-  // n = 0 message normal
-  // n = 1 message fin analyse
   messageId();
   if (FlagAlarmeTension || FlagLastAlarmeTension || FlagAlarme24V || FlagAlarmeCdeFBlc
       || FlagAlarmeGprs || FlagAlarmeMQTT) {
@@ -2750,7 +2759,7 @@ void generationMessage() {
   if(FlagAlarmeCdeFBlc){
     message += "Defaut Cde Feu Blanc" + fl;
   }
-  if (config.messageMode == true) {
+  // if (config.messageMode == true) {
     message += F("Gprs ");
     if (FlagAlarmeGprs) {
       message += F("KO");
@@ -2765,7 +2774,7 @@ void generationMessage() {
       message += F("OK");
     }
     message += fl;
-  }
+  // }
 }
 //---------------------------------------------------------------------------
 void sendSMSReply(String num , int sms) {
@@ -2817,7 +2826,7 @@ void sendSMSReply(String num , int sms) {
 //---------------------------------------------------------------------------
 void Envoyer_MQTT(){
   // Sbidon = "\"" + message + "\"";  
-  Serial.print("message a envoyer MQTT:"),Serial.println(message);
+  Serial.println("message a envoyer MQTT:"),Serial.println(message);
   Sbidon = message;
   Sbidon.toCharArray(replybuffer, Sbidon.length() + 1);
   byte cpt =0;
@@ -2958,7 +2967,7 @@ void SignalVie() {
     }
     Allumage(); // Violet 1, Blanc 0
   }
-  envoieGroupeSMS(0, 0);
+  envoieGroupeSMS(0, 1);
   action_wakeup_reason(4);
 }
 //---------------------------------------------------------------------------
@@ -3442,8 +3451,8 @@ void ConnexionWifi(char* ssid, char* pwd, String number, int slot) {
       server.handleClient(); // Listen for client connections
       delay(1);
     }
-    WifiOff();
   }
+  WifiOff();
 }
 //---------------------------------------------------------------------------
 void WifiOff() {
@@ -3454,7 +3463,7 @@ void WifiOff() {
   btStop();
   Alarm.delay(100);
   ResetHard();
-}
+} 
 //---------------------------------------------------------------------------
 void ResetHard() {
   // GPIO13 to RS reset hard
@@ -3575,11 +3584,10 @@ void DebutSleep() {
 
   byte i = 0;
   if (gsm) {
-    Serial.println("****************Gestion sleep modem à faire****************");
-    // while (!Sim800.sleep()) {
-    //   Alarm.delay(100);
-    //   if (i++ > 10) break;
-    // }
+    while (!modem.setPhoneFunctionality(0)) { // CFUN=0 minimum functionality
+      Alarm.delay(100);
+      if (i++ > 10) break;
+    }
   }
   Serial.flush();
   esp_deep_sleep_start();
@@ -3994,66 +4002,57 @@ void HomePage() {
   webpage += F("<td>mqtt serveur</td>");
   webpage += F("<td>");	webpage += String(config.mqttServer);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>mqtt port</td>");
   webpage += F("<td>");	webpage += String(config.mqttPort);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>mqtt username</td>");
   webpage += F("<td>");	webpage += String(config.mqttUserName);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>mqtt pass</td>");
   webpage += F("<td>");	webpage += String(config.mqttPass);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>send topic</td>");
   webpage += F("<td>");	webpage += String(config.sendTopic);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>receive topic</td>");
   webpage += F("<td>");	webpage += String(config.receiveTopic);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>mpermanent topic</td>");
   webpage += F("<td>");	webpage += String(config.permanentTopic);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>msg Mode 0SMS,1SMS+MQTT</td>");
   webpage += F("<td>");	webpage += String(config.messageMode);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>declage Heure ete</td>");
   webpage += F("<td>");	webpage += String(config.hete);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>declage Heure hiver</td>");
   webpage += F("<td>");	webpage += String(config.hhiver);	webpage += F("</td>");
   webpage += F("</tr>");
-  webpage += F("</table><br>");
 
   webpage += F("<tr>");
   webpage += F("<td>autoupload</td>");
   webpage += F("<td>");	webpage += String(config.autoupload);	webpage += F("</td>");
   webpage += F("</tr>");
+
   webpage += F("</table><br>");
 
   webpage += F("<a href='/download'><button>Download</button></a>");
@@ -4440,7 +4439,7 @@ byte FTP_upload_function (char *file2upload){
     return false;
   }
   // Upload du fichier
-  tosend = "AT+CFTPSPUTFILE=\"" + Id + String(file2upload) + "\",3"; // 3 pour E:
+  tosend = "AT+CFTPSPUTFILE=\"" + String(config.Idchar) + String(file2upload) + "\",3"; // 3 pour E:
   Serial.print("FTP Upload :"), Serial.println(tosend);
   Sbidon = sendAT(tosend,"OK","ERROR",10000);
   Serial.print("FTP Upload :"), Serial.println(Sbidon);
@@ -4453,7 +4452,7 @@ byte FTP_upload_function (char *file2upload){
     return false;
   }
   delay(500);
-  tosend = "AT+CFTPSLIST=\"" + Id + "\"";
+  tosend = "AT+CFTPSLIST=\"" + String(config.Idchar) + "\"";
   Sbidon = sendAT(tosend,"+CFTPSLIST","ERROR",10000);
   Serial.print("FTP Dir :"), Serial.println(Sbidon);
   if(Sbidon.indexOf(String(file2upload).substring(1))>-1){// apres le / de debut
@@ -4546,7 +4545,7 @@ void VerifCdeFBlc(){
         Serial.print("Cpt Cde FBLc:"),Serial.print(compteurmesureres);
         Serial.print(", accu:"),Serial.print(accumesureres);
         Serial.print(", %:"),Serial.println((float)accumesureres/compteurmesureres);
-        if((float)accumesureres/compteurmesureres < .35 ){// .35, .5 = M, .75 = S
+        if((float)accumesureres/compteurmesureres < .25 ){// .35, .5 = M, .75 = S
           Serial.println("Alarme Cde Feu Blanc");
           FlagAlarmeCdeFBlc = true;
           if(!FlagLastAlarmeCdeFBlc){ // si premiere fois

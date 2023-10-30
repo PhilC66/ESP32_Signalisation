@@ -2,25 +2,6 @@
     "version": 4,
     "configurations": [
         {
-            "name": "Win32",
-            "compilerPath": "C:\\Program Files\\LLVM\\bin\\clang.exe",
-            "compilerArgs": [],
-            "intelliSenseMode": "windows-clang-x64",
-            "includePath": [
-                "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\tools\\**",
-                "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\**",
-                "${workspaceFolder}/**"
-            ],
-            "forcedInclude": [],
-            "cStandard": "c11",
-            "cppStandard": "c++17",
-            "defines": [
-                "_DEBUG",
-                "UNICODE",
-                "_UNICODE"
-            ]
-        },
-        {
             "name": "Arduino",
             "compilerPath": "C:\\Users\\phili\\AppData\\Local\\Arduino15\\packages\\esp32\\tools\\xtensa-esp32-elf-gcc\\esp-2021r2-patch5-8.4.0\\bin\\xtensa-esp32-elf-g++",
             "compilerArgs": [
