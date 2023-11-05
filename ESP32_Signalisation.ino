@@ -75,21 +75,30 @@
   ok autoupload parametre auto upload fichier log.txt en FTP
   ok wifi ssid augmenté nbr caracteres à 25 et pass à 30
   ok gestion sleep modem CFUN=0, CFUN=1 au lancement
-  
-  à tester softupdate par Raspi
+
+  OK softupdate par Raspi 
   decider et tester reset modem et powerkey?
   powerkey pulldown hard par defaut sur carte modem
   ajouter dans ResetHard un +CRESET ou
   utiliser powerkey au démarrage
 
+  V3-03 05/11/2023 OK garde SPIFFS reste compatible existant(fichiers en SPIFFS)
+  Compilation LOLIN D32,default,80MHz, ESP32 2.0.11 changer sur BOX to WPA/WPA2
+  Arduino IDE 1.8.19 : 1098757 83%, 54824 16% sur PC
+  Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
 
-  V3-02 30/10/2023 OK pour test
+  V3-02 05/11/2023 OK pour test reste compatible existant(fichiers en SPIFFS)
+  Compilation LOLIN D32,default,80MHz, ESP32 1.0.6 V2+ Wifi not connect!
+  Arduino IDE 1.8.19 : 1081534 82%, 48776 14% sur PC
+  Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
+
+  V3-02 30/10/2023 OK pour test KO Wifi not connect!
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.11
-  Arduino IDE 1.8.19 : 1101293 84%, 54848 16% sur PC
+  Arduino IDE 1.8.19 : 1101209 84%, 54840 16% sur PC
   Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
 
   V3-0 10/10/2023
-  version ESP32 V2.0.11, LittleFS, suppression EEPROM
+  version ESP32 V2.0.11, SPIFFS, suppression EEPROM
   focntionnelle en 2G avant passage 4G
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.11
   Arduino IDE 1.8.19 : 1095625 83%, 54456 17% sur PC
@@ -99,7 +108,7 @@
 
 #include <Arduino.h>
 
-String ver        = "V3-02";
+String ver        = "V3-03";
 int    Magique    = 3;
 
 #define TINY_GSM_MODEM_SIM7600
@@ -112,7 +121,7 @@ int    Magique    = 3;
 #include <TimeAlarms.h>
 // #include <sys/time.h>             //<sys/time.h>
 #include <WiFi.h>
-#include <LittleFS.h>
+#include <SPIFFS.h>
 #include <ArduinoOTA.h>
 #include <WiFiClient.h>
 #include <WebServer.h>
@@ -166,11 +175,11 @@ uint64_t TIME_TO_SLEEP  = 15;/* Time ESP32 will go to sleep (in seconds) */
 unsigned long debut     = 0; // pour decompteur temps wifi
 // unsigned long timer100  = 0; // pour timer 100ms adc
 byte calendrier[13][32]; // tableau calendrier ligne 0 et jour 0 non utilisé, 12*31
-char fileconfig[12]      = "/config.txt";   // fichier en LittleFS contenant structure config
-char filecalendrier[13]  = "/filecal.csv";  // fichier en LittleFS contenant le calendrier de circulation
-char filecalibration[11] = "/coeff.txt";    // fichier en LittleFS contenant les data de calibration
-char filelog[9]          = "/log.txt";      // fichier en LittleFS contenant le log
-char filelumlut[13]      = "/lumlut.txt";   // fichier en LittleFS LUT luminosité
+char fileconfig[12]      = "/config.txt";   // fichier en SPIFFS contenant structure config
+char filecalendrier[13]  = "/filecal.csv";  // fichier en SPIFFS contenant le calendrier de circulation
+char filecalibration[11] = "/coeff.txt";    // fichier en SPIFFS contenant les data de calibration
+char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le log
+char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
 
@@ -203,27 +212,21 @@ bool FlagTqt_1               = false; // Position Taquet false = fermé, entree=
 bool FlagLastTqt_1           = false; // memo last etat
 bool FlagTqt_2               = false; // Position Taquet false = fermé, entree=0
 bool FlagLastTqt_2           = false; // memo last etat
-bool FlagReset = false;       // Reset demandé
-bool jour      = false;				// jour = true, nuit = false
-bool gsm       = true;        // carte GSM presente utilisé pour test sans GSM seulement
-bool FlagMessageLocal   = false;
-bool FlagAlarmeGprs     = false; // Alarme confirmée
-bool AlarmeGprs         = false; // detection alarme
-bool FlagLastAlarmeGprs = false;
-bool FlagAlarmeMQTT     = false;
-bool AlarmeMQTT         = false;
-bool FlagLastAlarmeMQTT = false;
-bool FlagAlarmeGps      = false;
-bool AlarmeGps          = false;
-bool FlagLastAlarmeGps  = false;
-// bool lancement          = false;    // passe a true apres lancement
-String Memo_Demande_Feux[3]={"","",""};  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4,V7)
-bool FlagDemande_Feux = false;   // si demande encours = true
+bool FlagReset               = false; // Reset demandé
+bool jour                    = false; // jour = true, nuit = false
+bool gsm                     = true;  // carte GSM presente utilisé pour test sans GSM seulement
+bool FlagMessageLocal        = false;
+bool FlagAlarmeGprs          = false; // Alarme confirmée
+bool AlarmeGprs              = false; // detection alarme
+bool FlagLastAlarmeGprs      = false;
+bool FlagAlarmeMQTT          = false;
+bool AlarmeMQTT              = false;
+bool FlagLastAlarmeMQTT      = false;
+String Memo_Demande_Feux[3] ={"","",""};  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4,V7)
+bool FlagDemande_Feux       = false;   // si demande encours = true
 
 int CoeffTension[4];          // Coeff calibration Tension
 int CoeffTensionDefaut = 7000;// Coefficient par defaut
-
-// bool LastWupAlarme = false;   // memo etat Alarme par Wakeup
 
 int    slot = 0;              //this will be the slot number of the SMS
 
@@ -322,12 +325,12 @@ void setup() {
   Serial.println();
   Serial.println(__FILE__);
 
-  if (!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)) { // Format la première fois utilise LitteFS
-    Serial.println(F("LittleFS initialisation failed..."));
+  if (!SPIFFS.begin(FORMAT_LITTLEFS_IF_FAILED)) { // Format la première fois utilise LitteFS
+    Serial.println(F("SPIFFS initialisation failed..."));
     LittleFS_present = false;
   }
   else {
-    Serial.println(F("LittleFS initialised... file access enabled..."));
+    Serial.println(F("SPIFFS initialised... file access enabled..."));
     LittleFS_present = true;
   }
   
@@ -390,8 +393,8 @@ void setup() {
   readConfig(); // Lecture de la config
   if (config.magic != Magique) {
     /* verification numero magique si different
-    		erreur lecture fileconfig ou carte vierge
-    		on charge les valeurs par défaut
+      erreur lecture fileconfig ou carte vierge
+      on charge les valeurs par défaut
     */
     Serial.println("Nouvelle Configuration !");
     config.magic         = Magique;
@@ -484,9 +487,9 @@ void setup() {
     else if (error == OTA_END_ERROR)     Serial.println("End Failed");
   });
 
-  OuvrirCalendrier();					// ouvre calendrier circulation en LittleFS
-  OuvrirFichierCalibration(); // ouvre fichier calibration en LittleFS
-  OuvrirLumLUT();             // ouvre le fichier lumLUT en LittleFS
+  OuvrirCalendrier();					// ouvre calendrier circulation en SPIFFS
+  OuvrirFichierCalibration(); // ouvre fichier calibration en SPIFFS
+  OuvrirLumLUT();             // ouvre le fichier lumLUT en SPIFFS
   // Serial.print(F("temps =")),Serial.println(millis());
   if (gsm) {
     Serial.print(("Waiting for network..."));
@@ -826,7 +829,6 @@ void Acquisition() {
   }
   if(gsm && config.messageMode == true && firstdecision){  //config.messageMode = SMS+MQTT
     static byte nalaGprs = 0;
-    static byte nalaGps  = 0;
     static byte nalaMQTT = 0;
     if (AlarmeGprs) {
       if (nalaGprs ++ > config.cptAla) {
@@ -838,18 +840,6 @@ void Acquisition() {
         nalaGprs --;
       } else {
         FlagAlarmeGprs = false;
-      }
-    }
-    if (AlarmeGps) {
-      if (nalaGps ++ > config.cptAla) {
-        FlagAlarmeGps = true;
-        nalaGps = 0;
-      }
-    } else {
-      if (nalaGps > 0) {
-        nalaGps --;
-      } else {
-        FlagAlarmeGps = false;
       }
     }
     if (AlarmeMQTT) {
@@ -1352,7 +1342,7 @@ fin_tel:
       sendSMSReply(smsstruct.sendernumber, slot);
     }
     else if (smsstruct.message.indexOf(F("LOG")) == 0) {	// demande taille du log
-      File f = LittleFS.open(filelog, "r"); // taille du fichier log en LittleFS
+      File f = SPIFFS.open(filelog, "r"); // taille du fichier log en SPIFFS
       message = F("local log size :");
       message += String(f.size()) + fl;
       f.close();
@@ -1613,7 +1603,7 @@ fin_tel:
             calendrier[m][j] = jour[j - 1];
           }
           // Serial.print("mois:"),Serial.println(m);
-          EnregistreCalendrier(); // Sauvegarde en LittleFS
+          EnregistreCalendrier(); // Sauvegarde en SPIFFS
           // message += F("Mise a jour calendrier \nmois:");
           // message += m;
           // message += " OK (json)";
@@ -1651,7 +1641,7 @@ fin_tel:
               calendrier[m][i] = smsstruct.message.substring(p2 + i, p2 + i + 1).toInt();
               // Serial.print(smsstruct.message.substring(p2+i,p2+i+1));
             }
-            EnregistreCalendrier(); // Sauvegarde en LittleFS
+            EnregistreCalendrier(); // Sauvegarde en SPIFFS
             // message += F("Mise a jour calendrier mois:");
             // message += m;
             // message += " OK";
@@ -1699,7 +1689,7 @@ fin_tel:
     else if (smsstruct.message == F("CIRCULE")) {
       bool ok = false;
       /* demande passer en mode Circulé pour le jour courant,
-        sans modification calendrier enregistré en LittleFS */
+        sans modification calendrier enregistré en SPIFFS */
       if (!(calendrier[month()][day()] ^ flagCircule)) {
         // calendrier[month()][day()] = 1;
         message += F("OK, Circule");
@@ -1720,7 +1710,7 @@ fin_tel:
     else if (smsstruct.message == F("NONCIRCULE")) {
       bool ok = false;
       /* demande passer en mode nonCirculé pour le jour courant,
-        sans modification calendrier enregistré en LittleFS 
+        sans modification calendrier enregistré en SPIFFS 
         extinction Feux*/
       if (calendrier[month()][day()] ^ flagCircule) {
         // calendrier[month()][day()] = 0;
@@ -1813,7 +1803,7 @@ fin_tel:
           recoit message "CALIBRATION=1250" mesure réelle en V*100
           calcul nouveau coeff = mesure reelle/resultat stocké * CoeffTensionDefaut
           applique nouveau coeff
-          stock en LittleFS
+          stock en SPIFFS
           sort du mode calibration
 
           variables
@@ -1870,7 +1860,7 @@ fin_tel:
         // tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
         CoeffTension[M - 1] = coef;
         FlagCalibration = false;
-        Recordcalib();														// sauvegarde en LittleFS
+        Recordcalib();														// sauvegarde en SPIFFS
 
         if (M == 4 && !Allume) {
           digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
@@ -2207,7 +2197,7 @@ fin_tel:
 
       if(reply == true){
         message += F("upload OK");
-        LittleFS.remove(filelog);  // efface fichier log
+        SPIFFS.remove(filelog);  // efface fichier log
         MajLog(nomAppelant, "");         // nouveau log
         MajLog(nomAppelant, F("upload OK"));// renseigne nouveau log
       } else {
@@ -2310,7 +2300,7 @@ fin_tel:
       // {"MQTTDATA":{"serveur":"xxxx.org","user":"uuu","pass":"passpass","port":9999,"permanent_topic":"CV65/permanent","send_topic":"Signalisation/input","receive_topic":"CV65/output"}}
 
       bool erreur = false;
-      bool formatsms = false;
+      // bool formatsms = false;
       if (smsstruct.message.indexOf(":") == 11) { // format json
         DynamicJsonDocument doc(384); //https://arduinojson.org/v6/assistant/
         DeserializationError err = deserializeJson(doc, smsstruct.message);
@@ -2465,7 +2455,7 @@ fin_tel:
       sendSMSReply(smsstruct.sendernumber, slot);
     }
     else if (smsstruct.message == "VIDELOG"){
-      LittleFS.remove(filelog);
+      SPIFFS.remove(filelog);
       FileLogOnce = false;
       message += "Effacement fichier log";
       sendSMSReply(smsstruct.sendernumber, slot);
@@ -2484,7 +2474,7 @@ fin_tel:
     }
     else if (smsstruct.message.indexOf(F("CPTALATRCK")) == 0 || smsstruct.message.indexOf(F("CPTALA")) == 0) { // Compteur Ala avant Flag
         if (smsstruct.message.indexOf(char(61)) == 10) {
-          byte c = smsstruct.message.substring(11).toInt();
+          int c = smsstruct.message.substring(11).toInt();
           if (c > 1 && c < 501) {
             config.cptAla = c;
             sauvConfig();
@@ -3062,7 +3052,7 @@ void appendFile(fs::FS &fs, const char * path, const char * message) {
 void readConfig(){
   Serial.printf("Reading file: %s\r\n", fileconfig);
 
-  File file = LittleFS.open(fileconfig);
+  File file = SPIFFS.open(fileconfig);
   if(!file || file.isDirectory()){
     Serial.println("- failed to open file for reading");
     return;
@@ -3077,7 +3067,7 @@ void readConfig(){
 void sauvConfig(){
   Serial.printf("Writing file: %s\r\n", fileconfig);
 
-  File file = LittleFS.open(fileconfig, FILE_WRITE);
+  File file = SPIFFS.open(fileconfig, FILE_WRITE);
   if(!file){
     Serial.println("- failed to open file for writing");
     return;
@@ -3125,10 +3115,10 @@ void writeFile(fs::FS &fs, const char * path, const char * message){
   file.close();
 }
 //---------------------------------------------------------------------------
-void MajLog(String Id, String Raison) { // mise à jour fichier log en LittleFS
-  if(LittleFS.exists(filelog)){
+void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
+  if(SPIFFS.exists(filelog)){
     /* verification de la taille du fichier */
-    File f = LittleFS.open(filelog, "r");
+    File f = SPIFFS.open(filelog, "r");
     Serial.print(F("Taille fichier log = ")), Serial.println(f.size());
     // Serial.print(Id),Serial.print(","),Serial.println(Raison);
     if (f.size() > 150000 && !FileLogOnce) {
@@ -3166,7 +3156,7 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en LittleFS
         }
       }
       f.close();
-      LittleFS.remove(filelog);
+      SPIFFS.remove(filelog);
       FileLogOnce = false;
     }
     f.close();
@@ -3178,27 +3168,27 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en LittleFS
     strcat(Cbidon, Id.c_str());
     strcat(Cbidon, Raison.c_str());
     Serial.println(Cbidon);
-    appendFile(LittleFS, filelog, Cbidon);
+    appendFile(SPIFFS, filelog, Cbidon);
   }
   else{ // fichier n'existe pas, création fichier avec première ligne date et Id
     char Cbidon[101]; // 100 char maxi
     sprintf(Cbidon, "%02d/%02d/%4d %02d:%02d:%02d;", day(), month(), year(), hour(), minute(), second());
     strcat(Cbidon,config.Idchar);
     strcat(Cbidon,fl.c_str());
-    appendFile(LittleFS, filelog, Cbidon);
+    appendFile(SPIFFS, filelog, Cbidon);
     Serial.print("nouveau fichier log:"),Serial.println(Cbidon);
     sprintf(Cbidon, "%02d/%02d/%4d %02d:%02d:%02d", day(), month(), year(), hour(), minute(), second());
     Id = ";" + Id + ";";
     Raison += "\n";
     strcat(Cbidon, Id.c_str());
     strcat(Cbidon, Raison.c_str());
-    appendFile(LittleFS, filelog, Cbidon);
+    appendFile(SPIFFS, filelog, Cbidon);
   }
 }
 //---------------------------------------------------------------------------
 void EnregistreCalendrier() { // remplace le calendrier
 
-  LittleFS.remove(filecalendrier);
+  SPIFFS.remove(filecalendrier);
   Sbidon = "";
   char bid[63];
   for (int m = 1; m < 13; m++) {
@@ -3209,23 +3199,23 @@ void EnregistreCalendrier() { // remplace le calendrier
     Serial.println(Sbidon);
     Sbidon += fl;
     Sbidon.toCharArray(bid, 63);
-    appendFile(LittleFS, filecalendrier, bid);
+    appendFile(SPIFFS, filecalendrier, bid);
     Sbidon = "";
   }
 }
 //---------------------------------------------------------------------------
 void EnregistreLumLUT() {
-  LittleFS.remove(filelumlut);
+  SPIFFS.remove(filelumlut);
   char bid[9];
   for (int i = 0; i < 11; i++) {
     sprintf(bid, "%d,%d\n", TableLum[i][0], TableLum[i][1]);
-    appendFile(LittleFS, filelumlut, bid);
+    appendFile(SPIFFS, filelumlut, bid);
   }
 }
 //---------------------------------------------------------------------------
 void OuvrirLumLUT() {
-  if (LittleFS.exists(filelumlut)) {
-    File f = LittleFS.open(filelumlut, "r");
+  if (SPIFFS.exists(filelumlut)) {
+    File f = SPIFFS.open(filelumlut, "r");
     for (int i = 0; i < 11; i++) { //Read 11 lignes
       String s = f.readStringUntil('\n');
       int pos = s.indexOf(",");
@@ -3247,7 +3237,7 @@ void OuvrirLumLUT() {
         v2 = 10;
       }
       sprintf(bid, "%d,%d\n", v1, v2);
-      appendFile(LittleFS, filelumlut, bid);
+      appendFile(SPIFFS, filelumlut, bid);
       TableLum[i][0] = v1;
       TableLum[i][1] = v2;
     }
@@ -3270,10 +3260,10 @@ int lumlut(int l) {
 //---------------------------------------------------------------------------
 void OuvrirCalendrier() {
 
-  listDir(LittleFS, "/", 0);
-  bool f = LittleFS.exists(filecalendrier);
+  listDir(SPIFFS, "/", 0);
+  bool f = SPIFFS.exists(filecalendrier);
   // Serial.println(f);
-  File f0 = LittleFS.open(filecalendrier, "r");
+  File f0 = SPIFFS.open(filecalendrier, "r");
 
   if (!f || f0.size() == 0) {
     Serial.println(F("File doesn't exist yet. Creating it")); // creation calendrier defaut
@@ -3291,11 +3281,11 @@ void OuvrirCalendrier() {
       Serial.println(Sbidon);
       Sbidon += fl;
       Sbidon.toCharArray(bid, 63);
-      appendFile(LittleFS, filecalendrier, bid);
+      appendFile(SPIFFS, filecalendrier, bid);
       Sbidon = "";
     }
   }
-  readFileCalendrier(LittleFS, filecalendrier);
+  readFileCalendrier(SPIFFS, filecalendrier);
 
   for (int m = 1; m < 13; m++) {
     for (int j = 1; j < 32; j++) {
@@ -3303,7 +3293,7 @@ void OuvrirCalendrier() {
     }
     Serial.println();
   }
-  listDir(LittleFS, "/", 0);
+  listDir(SPIFFS, "/", 0);
 
 }
 //---------------------------------------------------------------------------
@@ -3483,8 +3473,8 @@ int moyenneAnalogique(int Pin) {	// calcul moyenne 10 mesures consécutives
 //---------------------------------------------------------------------------
 void OuvrirFichierCalibration() { // Lecture fichier calibration
 
-  if (LittleFS.exists(filecalibration)) {
-    File f = LittleFS.open(filecalibration, "r");
+  if (SPIFFS.exists(filecalibration)) {
+    File f = SPIFFS.open(filecalibration, "r");
     for (int i = 0; i < 4; i++) { //Read
       String s = f.readStringUntil('\n');
       CoeffTension[i] = s.toFloat();
@@ -3506,11 +3496,11 @@ void OuvrirFichierCalibration() { // Lecture fichier calibration
 
 }
 //---------------------------------------------------------------------------
-void Recordcalib() { // enregistrer fichier calibration en LittleFS
+void Recordcalib() { // enregistrer fichier calibration en SPIFFS
   // Serial.print(F("Coeff T Batterie = ")),Serial.println(CoeffTension1);
   // Serial.print(F("Coeff T Proc = "))	  ,Serial.println(CoeffTension2);
   // Serial.print(F("Coeff T VUSB = "))		,Serial.println(CoeffTension3);
-  File f = LittleFS.open(filecalibration, "w");
+  File f = SPIFFS.open(filecalibration, "w");
   f.println(CoeffTension[0]);
   f.println(CoeffTension[1]);
   f.println(CoeffTension[2]);
@@ -4146,7 +4136,7 @@ void File_Download() { // This gets called twice, the first pass selects the inp
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void DownloadFile(String filename) {
   if (LittleFS_present) {
-    File download = LittleFS.open("/" + filename,  "r");
+    File download = SPIFFS.open("/" + filename,  "r");
     if (download) {
       server.sendHeader("Content-Type", "text/text");
       server.sendHeader("Content-Disposition", "attachment; filename=" + filename);
@@ -4176,8 +4166,8 @@ void handleFileUpload() { // upload a new file to the Filing system
     String filename = uploadfile.filename;
     if (!filename.startsWith("/")) filename = "/" + filename;
     Serial.print(F("Upload File Name: ")); Serial.println(filename);
-    LittleFS.remove(filename);                  // Remove a previous version, otherwise data is appended the file again
-    UploadFile = LittleFS.open(filename, "w");  // Open the file for writing in LittleFS (create it, if doesn't exist)
+    SPIFFS.remove(filename);                  // Remove a previous version, otherwise data is appended the file again
+    UploadFile = SPIFFS.open(filename, "w");  // Open the file for writing in SPIFFS (create it, if doesn't exist)
   }
   else if (uploadfile.status == UPLOAD_FILE_WRITE)
   {
@@ -4207,11 +4197,11 @@ void handleFileUpload() { // upload a new file to the Filing system
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void LittleFS_dir() {
   if (LittleFS_present) {
-    File root = LittleFS.open("/");
+    File root = SPIFFS.open("/");
     if (root) {
       root.rewindDirectory();
       SendHTML_Header();
-      webpage += F("<h3 class='rcorners_m'>LittleFS Contents</h3><br>");
+      webpage += F("<h3 class='rcorners_m'>SPIFFS Contents</h3><br>");
       webpage += F("<table align='center'>");
       webpage += F("<tr><th>Name/Type</th><th style='width:20%'>Type File/Dir</th><th>File Size</th></tr>");
       printDirectory("/", 0);
@@ -4231,7 +4221,7 @@ void LittleFS_dir() {
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void printDirectory(const char * dirname, uint8_t levels) {
-  File root = LittleFS.open(dirname);
+  File root = SPIFFS.open(dirname);
   if (!root) {
     return;
   }
@@ -4268,10 +4258,10 @@ void File_Delete() {
 void LittleFS_file_delete(String filename) { // Delete the file
   if (LittleFS_present) {
     SendHTML_Header();
-    File dataFile = LittleFS.open("/" + filename, "r"); // Now read data from LittleFS Card
+    File dataFile = SPIFFS.open("/" + filename, "r"); // Now read data from SPIFFS Card
     if (dataFile)
     {
-      if (LittleFS.remove("/" + filename)) {
+      if (SPIFFS.remove("/" + filename)) {
         Serial.println(F("File deleted successfully"));
         webpage += "<h3>File '" + filename + "' has been erased</h3>";
         webpage += F("<a href='/delete'>[Back]</a><br><br>");
@@ -4323,7 +4313,7 @@ void SelectInput(String heading1, String command, String arg_calling_name) {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void ReportLittleFSNotPresent() {
   SendHTML_Header();
-  webpage += F("<h3>No LittleFS Card present</h3>");
+  webpage += F("<h3>No SPIFFS Card present</h3>");
   webpage += F("<a href='/'>[Back]</a><br><br>");
   append_page_footer();
   SendHTML_Content();
@@ -4397,7 +4387,7 @@ byte FTP_upload_function (char *file2upload){
     return false;
   }
   // copie file2upload dans e:
-  File f = LittleFS.open(file2upload, "r");
+  File f = SPIFFS.open(file2upload, "r");
   tosend = "AT+CFTRANRX=\"E:"+String(file2upload)+"\"," +String(f.size());
   Serial.print("copy file :"), Serial.println(tosend);
   Sbidon = sendAT(tosend,">","ERROR",1000);
