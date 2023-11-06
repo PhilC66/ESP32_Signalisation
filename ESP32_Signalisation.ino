@@ -115,11 +115,10 @@ int    Magique    = 3;
 
 #include <Battpct.h>
 #include "defs.h"
-#include <TinyGsmClient.h>         // librairie TinyGSM revue PhC
-#include <PubSubClient.h>          // modifié define MQTT_MAX_PACKET_SIZE 164
+#include <TinyGsmClient.h>         // librairie TinyGSM revue PhC 10.11.5
+#include <PubSubClient.h>          // modifié define MQTT_MAX_PACKET_SIZE 256
 #include <Time.h>
 #include <TimeAlarms.h>
-// #include <sys/time.h>             //<sys/time.h>
 #include <WiFi.h>
 #include <SPIFFS.h>
 #include <ArduinoOTA.h>
@@ -132,14 +131,12 @@ int    Magique    = 3;
 #include <ArduinoJson.h>
 #include <credentials_tpcf.h>
 
-// TINY_GSM_RX_BUFFER 1030   //update dejà defini dans TinyGsmTCP.tpp
 #define Serial Serial
 #define SerialAT Serial2
 #define TINY_GSM_DEBUG Serial
-// #define TINY_GSM_YIELD() { delay(2); } dejà defini dans TinyGsmCommon.h
 #define TINY_GSM_USE_GPRS true
 // #define TINY_GSM_USE_WIFI false
-#define GSM_PIN "1234"
+// #define GSM_PIN "1234"
 
 String  webpage = "";
 #define ServerVersion "1.0"
@@ -173,7 +170,6 @@ unsigned int adc_mm[5];            // stockage pour la moyenne mobile
 
 uint64_t TIME_TO_SLEEP  = 15;/* Time ESP32 will go to sleep (in seconds) */
 unsigned long debut     = 0; // pour decompteur temps wifi
-// unsigned long timer100  = 0; // pour timer 100ms adc
 byte calendrier[13][32]; // tableau calendrier ligne 0 et jour 0 non utilisé, 12*31
 char fileconfig[12]      = "/config.txt";   // fichier en SPIFFS contenant structure config
 char filecalendrier[13]  = "/filecal.csv";  // fichier en SPIFFS contenant le calendrier de circulation
@@ -199,7 +195,6 @@ bool blinker = false;
 RTC_DATA_ATTR int  Feux = 0; // Etat des Feux voir tableau au début
 RTC_DATA_ATTR bool FlagAlarmeTension       = false; // Alarme tension Batterie
 RTC_DATA_ATTR bool FlagLastAlarmeTension   = false;
-RTC_DATA_ATTR bool FlagMasterOff           = false; // Coupure Allumage en cas de pb
 RTC_DATA_ATTR bool FirstWakeup             = true;  // envoie premier message vie une seule fois
 RTC_DATA_ATTR bool flagCircule             = false; // circule demandé -> inverse le calendrier, valid 1 seul jour
 RTC_DATA_ATTR bool FileLogOnce             = false; // true si log > seuil alerte
@@ -215,7 +210,6 @@ bool FlagLastTqt_2           = false; // memo last etat
 bool FlagReset               = false; // Reset demandé
 bool jour                    = false; // jour = true, nuit = false
 bool gsm                     = true;  // carte GSM presente utilisé pour test sans GSM seulement
-bool FlagMessageLocal        = false;
 bool FlagAlarmeGprs          = false; // Alarme confirmée
 bool AlarmeGprs              = false; // detection alarme
 bool FlagLastAlarmeGprs      = false;
@@ -281,7 +275,7 @@ struct  config_t           // Structure configuration sauvée dans file config
   char    ftpPass[16];     // pwd ftp
   int     ftpPort;         // port ftp
   int     TypeBatt;        // Type Batterie 16: Pb 6elts, 24 LiFePO 4elts
-  uint8_t cptAla;          // Compteur alarmes Tracker avant declenchement
+  byte    cptAla;          // Compteur alarmes Tracker avant declenchement
   char    mqttServer[26];  // Serveur MQTT
   char    mqttUserName[11];// MQTT User
   char    mqttPass[16];    // MQTT pass
@@ -342,7 +336,7 @@ void setup() {
   pinMode(PinAlimLum , OUTPUT);
   pinMode(PinTest    , INPUT_PULLUP);
   pinMode(PinChckFblc, INPUT_PULLUP);
-  digitalWrite(PinConvert , LOW); // Alimentation Convert 0
+  digitalWrite(PinConvert , LOW);  // Alimentation Convert 0
   digitalWrite(PinAlimLum , HIGH); // Alimentation de la LDR
   adcAttachPin(PinBattProc);
   adcAttachPin(PinBattSol);
@@ -368,7 +362,7 @@ void setup() {
     SerialAT.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN); // fonctionne avec 115200
     Serial.println(F("Initializing modem..."));
     unsigned long debut = millis();
-    while(!modem.init()){
+    while(!modem.init()){ // mettre ici (RESET_PIN) pour utiliser powerkey du SIM7600
       modem.setPhoneFunctionality(1);// CFUN=1 full functionality, online mode
       delay(1000);
       if(millis() - debut > 60000) break;
@@ -389,6 +383,7 @@ void setup() {
 
   init_adc_mm();// initialisation tableau pour adc Moyenne Mobile
   ADC.attach_ms(100, adc_read); // lecture des adc toute les 100ms
+
   /* Lecture configuration file config	 */
   readConfig(); // Lecture de la config
   if (config.magic != Magique) {
@@ -1021,14 +1016,14 @@ void Allumage() {
 //---------------------------------------------------------------------------
 void Extinction() {
   Serial.println("Exctinction");
-  if(config.Ip1){ // si E1 active
-    if(FlagTqt_1){  // taquet ouvert
-      Feux = 0;   // D tout eteint et Taquet Ouvert
+  if(config.Ip1){  // si E1 active
+    if(FlagTqt_1){ // taquet ouvert
+      Feux = 0;    // D tout eteint et Taquet Ouvert
     } else {
-      Feux = 6;   // Z tout eteint et Taquet Fermé
+      Feux = 6;    // Z tout eteint et Taquet Fermé
     }
   } else {
-    Feux = 0;     // D tout eteint pas de Taquet
+    Feux = 0;      // D tout eteint pas de Taquet
   }
   GestionFeux();
   Allume = false;
@@ -1116,18 +1111,14 @@ void traite_sms(byte slot) {
       }
     }
     if (!(smsstruct.message.indexOf(F("MAJHEURE")) == 0)) { // suppression du SMS sauf si MAJHEURE
-        EffaceSMS(slot);
-        // Serial.print("efface sms slot dans premier1 slot <99:"),Serial.println(slot);
-      }
-      // Serial.print("efface sms slot dans premier2 slot <99:"),Serial.println(slot);
-      // EffaceSMS(slot);
+      EffaceSMS(slot);
+      // Serial.print("efface sms slot dans premier1 slot <99:"),Serial.println(slot);
+    }
   } else {
     smsstruct.message = replybuffer;
     if (slot == 99) nomAppelant = "console";
   } // si mesage venant de console
   Serial.print(F("texte du SMS :")), Serial.println(smsstruct.message);
-  // Serial.print("efface sms slot hors slot<99:"),Serial.println(slot);
-  // EffaceSMS(slot);
   if (!(smsstruct.message.indexOf(F("TEL")) == 0 || smsstruct.message.indexOf(F("tel")) == 0 || smsstruct.message.indexOf(F("Tel")) == 0
       || smsstruct.message.indexOf(F("Wifi")) == 0 || smsstruct.message.indexOf(F("WIFI")) == 0 || smsstruct.message.indexOf(F("wifi")) == 0
       || smsstruct.message.indexOf(F("MQTTDATA")) > -1 || smsstruct.message.indexOf(F("MQTTSERVEUR")) > -1
@@ -1274,7 +1265,6 @@ fin_tel:
       sendSMSReply(smsstruct.sendernumber, slot);// envoi sur plusieurs SMS
     }
     else if (smsstruct.message.indexOf(F("ETAT")) == 0 || smsstruct.message.indexOf(F("ST")) == 0) {// "ETAT? de l'installation"
-      // if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
       generationMessage();
       sendSMSReply(smsstruct.sendernumber, slot);
     }
@@ -1593,8 +1583,6 @@ fin_tel:
       if (smsstruct.message.indexOf("{") == 0) { // json
         DynamicJsonDocument doc(540);
         int f = smsstruct.message.lastIndexOf("}");
-        // Serial.print("pos }:"),Serial.println(f);
-        // Serial.print("json:"),Serial.print(smsstruct.message.substring(0,f+1)),Serial.println(".");,1,1,1,1,1,0,0,0,0,0,0]}";
         DeserializationError err = deserializeJson(doc, smsstruct.message.substring(0, f + 1));
         if(!err){
           m = doc["MOIS"]; // 12
@@ -1604,9 +1592,6 @@ fin_tel:
           }
           // Serial.print("mois:"),Serial.println(m);
           EnregistreCalendrier(); // Sauvegarde en SPIFFS
-          // message += F("Mise a jour calendrier \nmois:");
-          // message += m;
-          // message += " OK (json)";
         }
         else{
           message += " erreur json ";
@@ -1622,10 +1607,6 @@ fin_tel:
         }
 
         m = smsstruct.message.substring(p1 + 1, p2).toInt(); // mois
-
-        // printf("p1=%d,p2=%d\n",p1,p2);
-        // Serial.println(smsstruct.message.substring(p1+1,p2).toInt());
-        // Serial.println(smsstruct.message.substring(p2+1,smsstruct.message.length()).length());
         if (!(m > 0 && m < 13)) flag = false;
         if (W && flag) { // Write
           if (!(smsstruct.message.substring(p2 + 1, smsstruct.message.length()).length() == 31)) flag = false; // si longueur = 31(jours)
@@ -1642,9 +1623,6 @@ fin_tel:
               // Serial.print(smsstruct.message.substring(p2+i,p2+i+1));
             }
             EnregistreCalendrier(); // Sauvegarde en SPIFFS
-            // message += F("Mise a jour calendrier mois:");
-            // message += m;
-            // message += " OK";
           }
         }
         if(!flag) {
@@ -1664,13 +1642,6 @@ fin_tel:
           String jsonbidon;
           serializeJson(doc, jsonbidon);
           message += jsonbidon;
-          // message +="{\"mois\":" + String(m) + "," +fl;
-          // message += "\"jour\":[";
-          // for (int i = 1; i < 32 ; i++){
-          // message += String(calendrier[m][i]);
-          // if (i < 31) message += ",";
-          // }
-          // message += "]}";
         }
         else {
           message += F("mois = ");
@@ -2075,11 +2046,11 @@ fin_tel:
           }
           else{
             // Serial.print(F("Deserialization succeeded"));
-            JsonObject param = doc["PARAM2"];
-            config.LumAuto = param["LUMAUTO"];
-            config.FBlcPWM = param["FBLCPWM"];
-            config.FVltPWM = param["FVLTPWM"];
-            config.AutoF = param["AUTOF"];
+            JsonObject param  = doc["PARAM2"];
+            config.LumAuto    = param["LUMAUTO"];
+            config.FBlcPWM    = param["FBLCPWM"];
+            config.FVltPWM    = param["FVLTPWM"];
+            config.AutoF      = param["AUTOF"];
             config.TempoAutoF = param["TEMPOAUTOF"];
             sauvConfig();
           }
@@ -2125,7 +2096,6 @@ fin_tel:
             config.Ip1 = true;
             FlagTqt_1 = false;
             sauvConfig();
-            // ActiveInterrupt();
             valid = true;
             MajLog(nomAppelant, smsstruct.message);
           }
@@ -2135,7 +2105,6 @@ fin_tel:
             config.Ip1 = false;
             FlagTqt_1 = true;
             sauvConfig();
-            // DesActiveInterrupt();
             valid = true;
             MajLog(nomAppelant, smsstruct.message);
           }
@@ -2161,7 +2130,6 @@ fin_tel:
           if (!config.Ip2) {
             config.Ip2 = true;
             sauvConfig();
-            // ActiveInterrupt();
             valid = true;
           }
         }
@@ -2169,7 +2137,6 @@ fin_tel:
           if (config.Ip2) {
             config.Ip2 = false;
             sauvConfig();
-            // DesActiveInterrupt();
             valid = true;
           }
         }
@@ -2577,7 +2544,7 @@ fin_tel:
 }
 //---------------------------------------------------------------------------
 void envoie_alarme() {
-  /* determine si un SMS appartition/disparition Alarme doit etre envoyé */
+  /* determine si un SMS apparition/disparition Alarme doit etre envoyé */
   bool SendEtat = false;
 
   if (FlagAlarme24V != FlagLastAlarme24V) {
@@ -2671,9 +2638,6 @@ void generationMessage() {
   }
   message += fl;
   
-  // message += "Allumage = ";
-  // message += Allume;
-  // message += fl;
   switch (Feux) {
     case 0: // Violet 0, Blanc 0
       message += "D";
@@ -2729,17 +2693,7 @@ void generationMessage() {
     message += F("Alarme 24V = ");
     message += String(float(Tension24 / 100.0)) + "V" + fl;
   }
-  // if (Allume) {
-  // for (int i = 0; i < 5 ; i++) {
-  // read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V);
-  // Alarm.delay(1);
-  // }
-  // char bid[8];
-  // sprintf(bid, "%.2lf V", float(Tension24) / 100);
-  // message += F("Allume : ");
-  // message += String(bid);
-  // message += fl;
-  // }
+  
   if ((calendrier[month()][day()] ^ flagCircule)) {
     message += "Jour Circule" + fl;
   }
@@ -2749,22 +2703,22 @@ void generationMessage() {
   if(FlagAlarmeCdeFBlc){
     message += "Defaut Cde Feu Blanc" + fl;
   }
-  // if (config.messageMode == true) {
-    message += F("Gprs ");
-    if (FlagAlarmeGprs) {
-      message += F("KO");
-    } else {
-      message += F("OK");
-    }
-    message += fl;
-    message += F("Mqtt ");
-    if (FlagAlarmeMQTT) {
-      message += F("KO");
-    } else {
-      message += F("OK");
-    }
-    message += fl;
-  // }
+  
+  message += F("Gprs ");
+  if (FlagAlarmeGprs) {
+    message += F("KO");
+  } else {
+    message += F("OK");
+  }
+  message += fl;
+  message += F("Mqtt ");
+  if (FlagAlarmeMQTT) {
+    message += F("KO");
+  } else {
+    message += F("OK");
+  }
+  message += fl;
+  
 }
 //---------------------------------------------------------------------------
 void sendSMSReply(String num , int sms) {
@@ -2815,7 +2769,6 @@ void sendSMSReply(String num , int sms) {
 }
 //---------------------------------------------------------------------------
 void Envoyer_MQTT(){
-  // Sbidon = "\"" + message + "\"";  
   Serial.println("message a envoyer MQTT:"),Serial.println(message);
   Sbidon = message;
   Sbidon.toCharArray(replybuffer, Sbidon.length() + 1);
@@ -2913,7 +2866,7 @@ void MajHeure(bool force) {
 }
 //---------------------------------------------------------------------------
 long DureeSleep(long Htarget) { // Htarget Heure de reveil visée
-  /* calcul durée entre maintenant et Htarget*/
+  /* calcul durée entre maintenant et Htarget */
   long SleepTime = 0;
   long Heureactuelle = HActuelledec();
   if (Heureactuelle < Htarget) {
@@ -3081,7 +3034,7 @@ void sauvConfig(){
 }
 //---------------------------------------------------------------------------
 // Read File
-void readFile(fs::FS &fs, const char * path){
+void readFile(fs::FS &fs, const char * path){ // pas utilisé ici
   Serial.printf("Reading file: %s\r\n", path);
 
   File file = fs.open(path);
@@ -3098,7 +3051,7 @@ void readFile(fs::FS &fs, const char * path){
 }
 //---------------------------------------------------------------------------
 // Write File
-void writeFile(fs::FS &fs, const char * path, const char * message){
+void writeFile(fs::FS &fs, const char * path, const char * message){ // pas utilisé ici
   Serial.printf("Writing file: %s\r\n", path);
 
   File file = fs.open(path, FILE_WRITE);
@@ -3399,7 +3352,7 @@ void ConnexionWifi(char* ssid, char* pwd, String number, int slot) {
       server.send(200);
     }, handleFileUpload);
     server.on("/delete",   File_Delete);
-    server.on("/dir",      LittleFS_dir);
+    server.on("/dir",      SPIFFS_dir);
     server.on("/cal",      CalendarPage);
     server.on("/Tel_list", Tel_listPage);
     server.on("/LumLUT",   LumLUTPage);
@@ -4144,7 +4097,7 @@ void DownloadFile(String filename) {
       server.streamFile(download, "application/octet-stream");
       download.close();
     } else ReportFileNotPresent("download");
-  } else ReportLittleFSNotPresent();
+  } else ReportSPIFFSNotPresent();
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void File_Upload() {
@@ -4195,7 +4148,7 @@ void handleFileUpload() { // upload a new file to the Filing system
   }
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-void LittleFS_dir() {
+void SPIFFS_dir() {
   if (LittleFS_present) {
     File root = SPIFFS.open("/");
     if (root) {
@@ -4217,7 +4170,7 @@ void LittleFS_dir() {
     append_page_footer();
     SendHTML_Content();
     SendHTML_Stop();   // Stop is needed because no content length was sent
-  } else ReportLittleFSNotPresent();
+  } else ReportSPIFFSNotPresent();
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void printDirectory(const char * dirname, uint8_t levels) {
@@ -4250,12 +4203,12 @@ void printDirectory(const char * dirname, uint8_t levels) {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void File_Delete() {
   if (server.args() > 0 ) { // Arguments were received
-    if (server.hasArg("delete")) LittleFS_file_delete(server.arg(0));
+    if (server.hasArg("delete")) SPIFFS_file_delete(server.arg(0));
   }
   else SelectInput("Select a File to Delete", "delete", "delete");
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-void LittleFS_file_delete(String filename) { // Delete the file
+void SPIFFS_file_delete(String filename) { // Delete the file
   if (LittleFS_present) {
     SendHTML_Header();
     File dataFile = SPIFFS.open("/" + filename, "r"); // Now read data from SPIFFS Card
@@ -4275,7 +4228,7 @@ void LittleFS_file_delete(String filename) { // Delete the file
     append_page_footer();
     SendHTML_Content();
     SendHTML_Stop();
-  } else ReportLittleFSNotPresent();
+  } else ReportSPIFFSNotPresent();
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void SendHTML_Header() {
@@ -4311,7 +4264,7 @@ void SelectInput(String heading1, String command, String arg_calling_name) {
   SendHTML_Stop();
 }
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-void ReportLittleFSNotPresent() {
+void ReportSPIFFSNotPresent() {
   SendHTML_Header();
   webpage += F("<h3>No SPIFFS Card present</h3>");
   webpage += F("<a href='/'>[Back]</a><br><br>");
@@ -4463,37 +4416,6 @@ byte FTP_upload_function (char *file2upload){
   Serial.print("Suppression fichier en e: :"), Serial.println(Sbidon);
   return true;
 }
-//---------------------------------------------------------------------------
-// byte sendATcommand(String ATcommand, String answer1, String answer2, unsigned int timeout){
-//   byte reply = 1;
-//   String content = "";
-//   char character;
-
-//   //Clean the modem input buffer
-//   while(Serial2.available()>0) Serial2.read();
-
-//   //Send the atcommand to the modem
-//   Serial2.println(ATcommand);
-//   delay(100);
-//   unsigned int timeprevious = millis();
-//   while((reply == 1) && ((millis() - timeprevious) < timeout)){
-//     while(Serial2.available()>0) {
-//       character = Serial2.read();
-//       content.concat(character);
-//       Serial.print(character);
-//       delay(10);
-//     }
-//     //Stop reading conditions
-//     if (content.indexOf(answer1) != -1){
-//       reply = 0;
-//     }else if(content.indexOf(answer2) != -1){
-//       reply = 2;
-//     }else{
-//       //Nothing to do...
-//     }
-//   }
-//   return reply;
-// }
 //---------------------------------------------------------------------------
 String sendAT(String ATcommand, String answer1, String answer2, unsigned int timeout){
   byte reply = 1;
@@ -4830,9 +4752,6 @@ bool HeureEte() {
   else {
     Hete = true;                       								// c'est l'été
   }
-  // if(Hete == true){
-  //   Serial.println("Heure été");
-  // } else {Serial.println("Heure hiver");}
   return Hete;
 }
 //---------------------------------------------------------------------------
@@ -4865,10 +4784,10 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
     The program runs smoother if the main loop performs the processing steps instead of the callback.
     In this function, use flags to cause changes in the main loop. */
   /**
-     Process messages received from subscribed channel via MQTT broker.
-       topic - Subscription topic for message.
-       payload - Field to subscribe to. Value 0 means subscribe to all fields.
-       mesLength - Message length.
+    Process messages received from subscribed channel via MQTT broker.
+      topic - Subscription topic for message.
+      payload - Field to subscribe to. Value 0 means subscribe to all fields.
+      mesLength - Message length.
   */
   Serial.print("Message arrived on topic: ");
   Serial.print(topic);
