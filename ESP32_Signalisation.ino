@@ -82,6 +82,13 @@
   ajouter dans ResetHard un +CRESET ou
   utiliser powerkey au démarrage
 
+  V3-04 19/11/2023 OK
+  ajout SMS UPLOADCOEFF upload des coeff calibration vers serveur
+  ajout COEFF=xxxx,xxxx,xxxx,xxxx rechargement des coeff si perdus
+  Compilation LOLIN D32,default,80MHz, ESP32 2.0.11 changer sur BOX to WPA/WPA2
+  Arduino IDE 1.8.19 : 110313 83%, 54824 16% sur PC
+  Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
+
   V3-03 05/11/2023 OK garde SPIFFS reste compatible existant(fichiers en SPIFFS)
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.11 changer sur BOX to WPA/WPA2
   Arduino IDE 1.8.19 : 1098757 83%, 54824 16% sur PC
@@ -108,7 +115,7 @@
 
 #include <Arduino.h>
 
-String ver        = "V3-03";
+String ver        = "V3-04";
 int    Magique    = 3;
 
 #define TINY_GSM_MODEM_SIM7600
@@ -1522,7 +1529,7 @@ fin_tel:
           if ((p1 > 0 && p1 < 255)) {
             nv ++;
             if (nv == 10)break;
-          }
+          } 
           else {
             flag = false;
           }
@@ -2170,6 +2177,56 @@ fin_tel:
       } else {
         message += F("upload fail");
         MajLog(nomAppelant, F("upload fail"));// renseigne log
+      }
+      sendSMSReply(smsstruct.sendernumber, slot);
+    }
+    else if (gsm && smsstruct.message.indexOf(F("COEFF")) == 0) {//Lecture/ecriture des coeff
+      // COEFF=xxxx,xxxx,xxxx,xxxx
+      if(smsstruct.message.indexOf(char(61)) == 5){ // =
+        Sbidon = smsstruct.message.substring(6, smsstruct.message.length());
+        Serial.println(Sbidon);
+        int tempo[4] = {0,0,0,0};
+        byte p1 = 0;
+        byte p2 = 0;
+        bool flag = true;
+        for(int i = 0; i < 4; i++){          
+          // printf("i=%d,p1=%d,p2=%d\n",i,p1,p2);
+          p2 = Sbidon.indexOf(char(44), p1 + 1); // ,
+          tempo[i] = Sbidon.substring(p1,p2).toInt();
+          if(tempo[i] < 0) flag = false;
+          if(i!=3 && p2 == 255) flag = false;
+          p1 = p2 + 1;          
+          // printf("i=%d,p1=%d,p2=%d\n",i,p1,p2);
+        }
+        if (flag){ // format OK
+          for(int i = 0; i < 4; i++){
+            CoeffTension[i] = tempo[i];
+          }
+          Recordcalib(); // enregistre en SPIFFS
+        }
+      }
+      message += "Coeff calibration:" + fl;
+      for(int i = 0; i < 4; i++){
+        message += String(CoeffTension[i]);
+        if(i < 3 ) message += ",";
+      }
+      Serial.println(message);
+      sendSMSReply(smsstruct.sendernumber, slot);
+    }
+    else if (gsm && smsstruct.message.indexOf(F("UPLOADCOEFF")) == 0) {//upload des coeff
+      message += F("lancement upload Coeff");
+      message += fl;
+      MajLog(nomAppelant, "upload coeff");// renseigne log
+      Serial.println(F("Starting..."));
+      byte reply = FTP_upload_function(filecalibration); // Upload fichier
+      Serial.println("The end... Response: " + String(reply));
+
+      if(reply == true){
+        message += F("upload OK");
+        MajLog(nomAppelant, F("upload Coeff OK"));// renseigne nouveau log
+      } else {
+        message += F("upload fail");
+        MajLog(nomAppelant, F("upload Coeff fail"));// renseigne log
       }
       sendSMSReply(smsstruct.sendernumber, slot);
     }
@@ -4329,7 +4386,7 @@ void handleDateTime() { // getion Date et heure page web
 byte FTP_upload_function (char *file2upload){
   Serial.print("file to upload:"),Serial.println(file2upload);
   String tosend = "";
-  // copie fichier log.txt vers EFS sur modem SIM7600
+  // copie ud fichier file2upload vers EFS sur modem SIM7600
   sendAT("AT","OK","ERROR",1000);
   // Selection e:
   Sbidon = sendAT("AT+FSCD=E:","OK","ERROR",1000);
@@ -4395,6 +4452,7 @@ byte FTP_upload_function (char *file2upload){
     return false;
   }
   delay(500);
+  // relecture du repertoir sur FTP pour verification presence du fichier uploadé
   tosend = "AT+CFTPSLIST=\"" + String(config.Idchar) + "\"";
   Sbidon = sendAT(tosend,"+CFTPSLIST","ERROR",10000);
   Serial.print("FTP Dir :"), Serial.println(Sbidon);
