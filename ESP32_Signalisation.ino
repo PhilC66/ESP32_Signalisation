@@ -75,7 +75,8 @@
   ok autoupload parametre auto upload fichier log.txt en FTP
   ok wifi ssid augmenté nbr caracteres à 25 et pass à 30
   ok gestion sleep modem CFUN=0, CFUN=1 au lancement
-
+  ameliorer ADC https://github.com/G6EJD/ESP32-ADC-Accuracy-Improvement-function/blob/master/ESP32_ADC_Read_Voltage_Accurate.ino?ts=2
+  
   OK softupdate par Raspi 
   decider et tester reset modem et powerkey?
   powerkey pulldown hard par defaut sur carte modem
@@ -85,8 +86,9 @@
   V3-04 19/11/2023 OK
   ajout SMS UPLOADCOEFF upload des coeff calibration vers serveur
   ajout COEFF=xxxx,xxxx,xxxx,xxxx rechargement des coeff si perdus
+  Extinction Wifi et BT
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.11 changer sur BOX to WPA/WPA2
-  Arduino IDE 1.8.19 : 110313 83%, 54824 16% sur PC
+  Arduino IDE 1.8.19 : 1100325 83%, 54824 16% sur PC
   Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
 
   V3-03 05/11/2023 OK garde SPIFFS reste compatible existant(fichiers en SPIFFS)
@@ -574,6 +576,9 @@ void setup() {
   // }
   modem.setNetworkMode(2); // force Network Mode Auto
   MajLog("Auto","Lancement");
+  // reduire consommation eteindre Wifi et BT
+  WiFi.mode(WIFI_OFF);
+  btStop();
 }
 //---------------------------------------------------------------------------
 void loop() {
