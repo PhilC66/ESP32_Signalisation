@@ -75,6 +75,8 @@
   ok autoupload parametre auto upload fichier log.txt en FTP
   ok wifi ssid augmenté nbr caracteres à 25 et pass à 30
   ok gestion sleep modem CFUN=0, CFUN=1 au lancement
+  A FAIRE revoir re-envoie message free vers liste restreinte ligne 1111
+
   ameliorer ADC https://github.com/G6EJD/ESP32-ADC-Accuracy-Improvement-function/blob/master/ESP32_ADC_Read_Voltage_Accurate.ino?ts=2
   
   OK softupdate par Raspi 
