@@ -66,6 +66,13 @@
 
 
 	to do
+  V2-19 06/03/2024
+  1- Récupération des message long de free avec numero appelant de 29c et message de 268c
+  SIM800l modifié 1.1.31
+  
+  Compilation LOLIN D32,default,80MHz, IMPORTANT ESP32 1.0.2 (version > bug avec SPIFFS?)
+  Arduino IDE 1.8.19 : 1020322 77%, 47952 14% sur PC IDE Arduino
+  Arduino IDE 1.8.19 : 1020242 77%, 47944 14% sur raspi (sans ULP)
   
   V2-18 02/07/2023 installé spare ex Cv45 voir fichier etatversion.txt
   nouveau Magique
@@ -151,7 +158,7 @@
 
 #include <Arduino.h>
 
-String ver        = "V2-18";
+String ver        = "V2-19";
 int    Magique    = 14;
 
 #include <Battpct.h>
@@ -222,7 +229,7 @@ String bufferrcpt;
 String fl = "\n";                   //  saut de ligne SMS
 String Id ;                         //  Id du materiel sera lu dans EEPROM
 char   SIM800InBuffer[64];          //  for notifications from the SIM800
-char   replybuffer[255];            //  Buffer de reponse SIM800
+char   replybuffer[270];            //  Buffer de reponse SIM800, hstorique 255, 270 message long de free
 volatile int IRQ_Cpt_Ip1  = 0;      //  IRQ Ip1
 volatile int IRQ_Cpt_Ip2  = 0;      //  IRQ Ip2
 volatile unsigned long rebond1 = 0; //	antirebond IRQ
@@ -960,7 +967,7 @@ void traite_sms(byte slot) {
 
   char number[13];													// numero expediteur SMS
   String textesms;													// texte du SMS reçu
-  textesms.reserve(140);
+  textesms.reserve(270); // historique 140, 270 pour message long de free
   String numero;
   String nom;
   bool smsserveur = false; // true si le sms provient du serveur index=1
@@ -1004,7 +1011,8 @@ void traite_sms(byte slot) {
       Serial.print(F("Nom appelant = ")), Serial.println(nom);
       Serial.print(F("Numero = ")), Serial.println(numero);
       byte n = Sim800.ListPhoneBook(); // nombre de ligne PhoneBook
-      if(numero.length() < 8){ // numero service free
+      if(numero.length() < 8 || numero.length() > 20 
+        || numero == "Free Mobile" || numero.indexOf("Free") > -1){ // numero service free numero court et long(29) ou "Free Mobile"
         for (byte Index = 1; Index < n + 1; Index++) { // Balayage des Num Tel dans Phone Book
           if (config.Pos_Pn_PB[Index] == 1) { // Num dans liste restreinte
             String number = Sim800.getPhoneBookNumber(Index);
