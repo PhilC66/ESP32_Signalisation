@@ -90,7 +90,7 @@
   ajout COEFF=xxxx,xxxx,xxxx,xxxx rechargement des coeff si perdus
   Extinction Wifi et BT
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.11 changer sur BOX to WPA/WPA2
-  Arduino IDE 1.8.19 : 1100325 83%, 54824 16% sur PC
+  Arduino IDE 1.8.19 : 1100345 83%, 54824 16% sur PC
   Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
 
   V3-03 05/11/2023 OK garde SPIFFS reste compatible existant(fichiers en SPIFFS)
