@@ -1,7 +1,7 @@
 {
+    "configuration": "PartitionScheme=default,FlashFreq=80,UploadSpeed=921600,DebugLevel=none",
     "board": "esp32:esp32:d32",
     "sketch": "ESP32_Signalisation.ino",
     "output": "./build",
-    "defines": "USBCON",
-    "configuration": "PartitionScheme=default,FlashFreq=80,UploadSpeed=921600,DebugLevel=none,EraseFlash=none"
+    "defines": "USBCON"
 }
