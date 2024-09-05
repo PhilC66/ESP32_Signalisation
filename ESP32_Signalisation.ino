@@ -85,6 +85,12 @@
   ajouter dans ResetHard un +CRESET ou
   utiliser powerkey au démarrage
 
+  05/09/2024
+  version non testée et abandon 4G -> LTE-M
+  maj compilation
+  Compilation LOLIN D32,default,80MHz, ESP32 2.0.0
+  Arduino IDE 1.8.19 : 1137293 86%, 43700 13% sur PC VScode
+
   V3-04 19/11/2023 OK
   ajout SMS UPLOADCOEFF upload des coeff calibration vers serveur
   ajout COEFF=xxxx,xxxx,xxxx,xxxx rechargement des coeff si perdus
