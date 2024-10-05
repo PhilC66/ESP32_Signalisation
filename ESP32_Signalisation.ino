@@ -125,14 +125,14 @@
 
 #include <Arduino.h>
 
-String ver        = "V3-04";
-int    Magique    = 3;
+String ver        = "V4-00";
+int    Magique    = 1;
 
-#define TINY_GSM_MODEM_SIM7600
+#define TINY_GSM_MODEM_SIM7000
 
 #include <Battpct.h>
 #include "defs.h"
-#include <TinyGsmClient.h>         // librairie TinyGSM revue PhC 10.11.5
+#include <TinyGsmClient.h>         // librairie TinyGSM revue PhC 0.12.0
 #include <PubSubClient.h>          // modifié define MQTT_MAX_PACKET_SIZE 256
 #include <Time.h>
 #include <TimeAlarms.h>
@@ -193,16 +193,16 @@ char filecalendrier[13]  = "/filecal.csv";  // fichier en SPIFFS contenant le ca
 char filecalibration[11] = "/coeff.txt";    // fichier en SPIFFS contenant les data de calibration
 char filelog[9]          = "/log.txt";      // fichier en SPIFFS contenant le log
 char filelumlut[13]      = "/lumlut.txt";   // fichier en SPIFFS LUT luminosité
+char filePhoneBook[8]    = "/pb.txt";       // fichier contenant liste N°tel autorisé
 
 const String soft = "ESP32_Signalisation.ino.d32"; // nom du soft
 
 const String Mois[13] = {"", "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin", "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre"};
 String Sbidon 		= ""; // String texte temporaire
 String message;
-String bufferrcpt;
 String fl = "\n";                   //  saut de ligne SMS
 String Id ;                         //  Id du materiel sera lu dans config
-char   replybuffer[255];            //  Buffer de reponse SIM7600
+String Rmessage;                    //  Message reçu
 bool Allume  = false;
 byte BlcPwmChanel = 0;
 byte VltPwmChanel = 1;
@@ -298,11 +298,11 @@ struct  config_t           // Structure configuration sauvée dans file config
   char    mqttPass[16];    // MQTT pass
   char    sendTopic[20];   // channel Id output to server commun à tous
   char    receiveTopic[20];// channel Id input from server
-  char    permanentTopic[20];  // channel Id
   int     mqttPort;        // Port serveur MQTT
   int     hete;            // decalage Heure été UTC
   int     hhiver;          // decalage Heure hiver UTC
   bool    messageMode;     // false = sms,true=sms+mqtt pour message generé automatiquement
+  bool    sendSMS;         // Autorisation envoyer SMS
   bool    autoupload;      // Upload automatique du fichier log
 } ;
 config_t config;
@@ -430,6 +430,7 @@ void setup() {
     config.hete          = 2; // heure
     config.hhiver        = 1; // heure
     config.messageMode   = false; // SMS
+    config.sendSMS       = false; // pas d'envoie de SMS
     config.autoupload    = true;
     config.cptAla        = 10; // 11*Acquisition time
     for (int i = 0; i < 10; i++) {// initialise liste PhoneBook liste restreinte
@@ -456,10 +457,7 @@ void setup() {
     memcpy(config.receiveTopic,&config.Idchar[5],5);
     config.receiveTopic[5] = '\0';
     strcat(config.receiveTopic,"/output");
-    memcpy(config.permanentTopic,&config.Idchar[5],5);
-    config.permanentTopic[5] = '\0';
-    strcat(config.permanentTopic,"/permanent");
-
+    
     sauvConfig();
   }
   PrintConfig();
@@ -597,36 +595,37 @@ void loop() {
   // Attente donnée en provenance SIM7600
   // https://github.com/vshymanskyy/TinyGSM/pull/260/files
   
-  if(SerialAT.available()) { // reception caracteres depuis modem
-    unsigned long timerStart,timerEnd;
-    String interrupt = "";
-    timerStart = millis();
-    while(1) {
-      if(SerialAT.available()) {
-          char c = SerialAT.read();
-          interrupt+=c;   
-      }
-      timerEnd = millis();
-      if(timerEnd - timerStart > 1500){//1500
-      Serial.print("unsolicited message:"),Serial.println(interrupt);
-      if (interrupt.indexOf(F("CMTI")) >= 0 ) { // reception SMS
-        int p = interrupt.indexOf(","); // cherche numero de slot apres la virgule
-        slot = interrupt.substring(p+1,interrupt.length()).toInt();
-        // Serial.print(F("SMS en reception:")),Serial.println(slot);
-        traite_sms(slot);
-      }
-      if ((interrupt.indexOf(F("RING"))) >= 0) {	// Si appel entrant on raccroche
-        // Serial.println(F("Ca sonne!!!!"));
-        modem.callHangup();
-      }
-      if ((interrupt.indexOf(F("+CNTP: 0"))) >= 0 ) { // si reception relance majheure
-        // Serial.println(F("Relance mise à l'heure !"));
-        MajHeure();
-      }
-      break;
-      }
-    }
-  }
+  // A finir
+  // if(SerialAT.available()) { // reception caracteres depuis modem
+  //   unsigned long timerStart,timerEnd;
+  //   String interrupt = "";
+  //   timerStart = millis();
+  //   while(1) {
+  //     if(SerialAT.available()) {
+  //         char c = SerialAT.read();
+  //         interrupt+=c;   
+  //     }
+  //     timerEnd = millis();
+  //     if(timerEnd - timerStart > 1500){//1500
+  //     Serial.print("unsolicited message:"),Serial.println(interrupt);
+  //     if (interrupt.indexOf(F("CMTI")) >= 0 ) { // reception SMS
+  //       int p = interrupt.indexOf(","); // cherche numero de slot apres la virgule
+  //       slot = interrupt.substring(p+1,interrupt.length()).toInt();
+  //       // Serial.print(F("SMS en reception:")),Serial.println(slot);
+  //       traite_sms(slot);
+  //     }
+  //     if ((interrupt.indexOf(F("RING"))) >= 0) {	// Si appel entrant on raccroche
+  //       // Serial.println(F("Ca sonne!!!!"));
+  //       modem.callHangup();
+  //     }
+  //     if ((interrupt.indexOf(F("+CNTP: 0"))) >= 0 ) { // si reception relance majheure
+  //       // Serial.println(F("Relance mise à l'heure !"));
+  //       MajHeure();
+  //     }
+  //     break;
+  //     }
+  //   }
+  // }
   if(gsm && config.messageMode == 1){  //config.messageMode = SMS+MQTT
     // make sure GPRS/EPS is still connected
     if (!modem.isGprsConnected()) { // NETOPEN? Start TCPIP service
@@ -831,7 +830,7 @@ void Acquisition() {
 
     if (smsnum >= 0) {	// index du SMS en attente
       // il faut les traiter
-      traite_sms(smsnum);
+      ReadSMS(smsnum);// Lecture et traitement de tous les SMS en attente
     } 
     else if (smsnum < 0 && FlagReset) { // on verifie que tous les SMS sont traités avant Reset
       FlagReset = false;
@@ -1049,7 +1048,7 @@ void Extinction() {
   Allume = false;
   digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
   MajLog(F("Auto"), "Feux = " + String(Feux));
-  envoieGroupeSMS(3, 0); // envoie serveur
+  envoieGroupeMessage(0); // envoie serveur A finir
 }
 //---------------------------------------------------------------------------
 void AutoFermeture() {
@@ -1058,22 +1057,41 @@ void AutoFermeture() {
   if (Feux == 2 || Feux == 4 || Feux == 7) {
     Feux = 1;
     Allumage(); // Violet 1, Blanc 0
-    envoieGroupeSMS(3, 0); // envoie serveur
+    envoieGroupeMessage(0); // envoie serveur // A finir
     MajLog("AutoF", "FCV");
   }
   Alarm.disable(Auto_F);
 }
 //---------------------------------------------------------------------------
-void traite_sms(byte slot) {
-  /*
-  si slot=255, demande depuis message mqtt
-  si slot=99, demande depuis liaison serie en test, traiter sans envoyer de sms
-  */
+void ReadSMS(int index){
+  // index du SMS
+  // verifier appelant connu si OK copier texte sms dans Rmessage
+  // effacer SMS
+  // et envoyer traite_sms("SMS")
+
+  String SenderName;
   Sms smsstruct;
-  Serial.print(F("slot: ")); Serial.println(slot);
-  String nomAppelant;  	//nom expediteur SMS si existe dans Phone Book  
+  // A finir 
+    if (!modem.readSMS(&smsstruct,index)){
+      Serial.print(F("Didn't find SMS message in slot! "));
+      Serial.println(index);
+    }
+    if(! Cherche_N_PB(smsstruct.sendernumber)){
+      Serial.println(F("Appelant inconnu"));
+      EffaceSMS(index);
+      return;
+    }
+    Rmessage = smsstruct.message;
+    EffaceSMS(index);
+    traite_sms("SMS");
+}
+//---------------------------------------------------------------------------
+void traite_sms(String Origine) {
+  // Origine = Local,BLE,SMS,MQTT_S (serveur),MQTT_U (user)
+  bool sms = false;
+  if(Origine == "SMS") sms = true;
+  
   bool smsserveur = false; // true si le sms provient du serveur index=1
-  bool sms = true;
 
   /* Variables pour mode calibration */
   static int tensionmemo = 0;//	memorisation tension batterie lors de la calibration
@@ -1082,1229 +1100,1338 @@ void traite_sms(byte slot) {
   static byte M = 0; // Mode calibration 1,2,3,4
   static bool FlagCalibration = false;	// Calibration Tension en cours
 
-  // if (slot == 99) sms = false;
-  if (slot == 255){
-    smsserveur = true;
-    nomAppelant = "serveur_MQTT";
-  }
-  // /* Retrieve SMS sender address/phone number. */
-  if (slot < 99) {
-    if (!modem.readSMS(&smsstruct,slot)){
-      Serial.print(F("Didn't find SMS message in slot!"));
-      Serial.println(slot);
-      // continue;	//	Next k
-      return;
-    }
-    if(! Cherche_N_PB(smsstruct.sendernumber)){
-      Serial.println(F("Appelant inconnu"));
-    } else {
-      Serial.print(F("Num :")), Serial.print(Phone.number);
-      Serial.print(F(", Nom :")), Serial.println(Phone.text);
-    }
-    nomAppelant = Phone.text;
-    // Serial.print(F("Nom appelant:")), Serial.println(nomAppelant);
-    
-    // cherche si numero appelant est le serveur position 1
-    PhonebookEntry Phone2;
-    Phone2 = {"",""};
-    modem.readPhonebookEntry(&Phone2, 1); // lecture numero serveur 1
-    if (Phone.number == Phone2.number) {
-      smsserveur = true; // si demande provient du serveur index=1
-      // Serial.print("Num appelant:"),Serial.print(Phone.number);
-      // Serial.print("Num serveur :"),Serial.print(Phone2.number);
-    }
-  
-    if(Phone.number.length() < 8){ // numero service free renvoie sms vers Num dans liste restreinte
-    Serial.print("Phone.number.length() < 8:"),Serial.println(Phone.number.length());
-      for (byte Index = 1; Index < 10; Index++) { // Balayage des Num Tel dans Phone Book
-        Phone = {"",""};
-        if(modem.readPhonebookEntry(&Phone, Index)){
-          if(Phone.number.length() > 0){
-            if (config.Pos_Pn_PB[Index] == 1) { // Num dans liste restreinte
-              message = smsstruct.message;
-              sendSMSReply(Phone.number , slot);
-              EffaceSMS(slot);
-              return; // sortir de la procedure traite_sms
-            }
-          } else {Index = 10;}
-        }
-      }
-    }
-    if (!(smsstruct.message.indexOf(F("MAJHEURE")) == 0)) { // suppression du SMS sauf si MAJHEURE
-      EffaceSMS(slot);
-      // Serial.print("efface sms slot dans premier1 slot <99:"),Serial.println(slot);
-    }
-  } else {
-    smsstruct.message = replybuffer;
-    if (slot == 99) nomAppelant = "console";
-  } // si mesage venant de console
-  Serial.print(F("texte du SMS :")), Serial.println(smsstruct.message);
-  if (!(smsstruct.message.indexOf(F("TEL")) == 0 || smsstruct.message.indexOf(F("tel")) == 0 || smsstruct.message.indexOf(F("Tel")) == 0
-      || smsstruct.message.indexOf(F("Wifi")) == 0 || smsstruct.message.indexOf(F("WIFI")) == 0 || smsstruct.message.indexOf(F("wifi")) == 0
-      || smsstruct.message.indexOf(F("MQTTDATA")) > -1 || smsstruct.message.indexOf(F("MQTTSERVEUR")) > -1
-      || smsstruct.message.indexOf(F("GPRSDATA")) > -1 || smsstruct.message.indexOf(F("FTPDATA")) > -1 || smsstruct.message.indexOf(F("FTPSERVEUR")) > -1)) {
-    smsstruct.message.toUpperCase();	// passe tout en Maj sauf si "TEL" ou "WIFI" parametres pouvant contenir minuscules
-    // smsstruct.message.trim();
-  }
-  smsstruct.message.replace(" ", "");// supp tous les espaces
-  // Serial.print(F("smsstruct.message  = ")), Serial.println(smsstruct.message);
+  Serial.print("message: "), Serial.print(Rmessage),Serial.print(","),Serial.println(Rmessage.length());
 
-  if ((slot < 100 && nomAppelant.length() > 0) || slot == 255) {        // si nom appelant existant dans phone book
-    // numero.toCharArray(number, numero.length() + 1); // on recupere le numéro
-    messageId();
-    if (smsstruct.message.indexOf(F("TIMEOUTWIFI")) > -1) { // Parametre Arret Wifi
-      if (smsstruct.message.indexOf(char(61)) == 11) {
-        int n = smsstruct.message.substring(12, smsstruct.message.length()).toInt();
-        if (n > 9 && n < 3601) {
-          config.timeoutWifi = n;
-          sauvConfig();														// sauvegarde config
-        }
-      }
-      message += F("TimeOut Wifi (s) = ");
-      message += config.timeoutWifi;
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("WIFIOFF")) > -1) { // Arret Wifi
-      message += F("Wifi off");
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-      WifiOff();
-    }
-    else if (smsstruct.message.indexOf(F("Wifi")) == 0) { // demande connexion Wifi
-      byte pos1 = smsstruct.message.indexOf(char(44));//","
-      byte pos2 = smsstruct.message.indexOf(char(44), pos1 + 1);
-      String ssids = smsstruct.message.substring(pos1 + 1, pos2);
-      String pwds  = smsstruct.message.substring(pos2 + 1, smsstruct.message.length());
-      char ssid[25];
-      char pwd[30];
-      ssids.toCharArray(ssid, ssids.length() + 1);
-      ssids.toCharArray(ssid, ssids.length() + 1);
-      pwds.toCharArray(pwd, pwds.length() + 1);
-      ConnexionWifi(ssid, pwd, smsstruct.sendernumber, sms); // message généré par routine
-    }
-    else if (gsm && (smsstruct.message.indexOf(F("TEL")) == 0
-              || smsstruct.message.indexOf(F("Tel")) == 0
-              || smsstruct.message.indexOf(F("tel")) == 0)) { // entrer nouveau num
-      String numero;
-      String nom;
-      byte index = 0;
-      bool FlagOK = true;
-      byte j = 0;
-      bool add = true; // ajouter/modification numero = true, suppression = false
-      // String sendAT	= F("AT+CPBW=");	// ecriture dans le phone book
-      if (smsstruct.message.indexOf(char(61)) == 4) { // TELn= reserver correction/suppression
-        int i = smsstruct.message.substring(3).toInt();// recupere n° de ligne
-        i = i / 1; // important sinon i ne prend pas sa valeur dans les comparaison?
-        //Serial.println(i);
-        if (i < 1) FlagOK = false;
-        // sendAT += i;
-        index = i;
-        j = 5;
-        // on efface la ligne sauf la 1 pour toujours garder au moins un numéro
-        if ( (i != 1) && ( smsstruct.message.indexOf(F("efface")) == 5
-                        || smsstruct.message.indexOf(F("EFFACE")) == 5 )){
-          add = false;
-          goto fin_tel;
-        }
-      }
-      else if (smsstruct.message.indexOf(char(61)) == 3) { // TEL= nouveau numero
-        j = 4;
-      }
-      else {
-        FlagOK = false;
-      }
-      if (smsstruct.message.indexOf("+") == j) {			// debut du num tel +
-        if (smsstruct.message.indexOf(",") == j + 12) {	// verif si longuer ok
-          numero = smsstruct.message.substring(j, j + 12);
-          nom    = smsstruct.message.substring(j + 13, j + 27);	// pas de verif si long<>0?
-          // sendAT += F(",\"");
-          // sendAT += numero;
-          // sendAT += F("\",145,\"");
-          // sendAT += nom;
-          // sendAT += F("\"");
-        }
-        else {
-          FlagOK = false;
-        }
-      }
-      else {
-        FlagOK = false;
-      }
-fin_tel:
-      if (!FlagOK) { // erreur de format
-        //Serial.println(F("false"));
-        messageId();
-        message += F("Commande non reconnue ?");// non reconnu
-        sendSMSReply(smsstruct.sendernumber, slot);						// SMS non reconnu
-      }
-      else {          
-        messageId();
-        if(add){
-          // ajouter N° à index
-          message += F("Nouveau Num Tel: ");
-          Serial.println(numero);
-          Serial.println(nom);
-          Serial.println(index);
-          if(modem.addPhonebookEntry(numero,nom,index)){
-            message += F("OK");
-          } else { message += F("KO");}
-          message += fl;
-          message += index;
-          message += ":";
-          message += numero;
-          message += ":";
-          message += nom;
-          message += fl;
-        } else {
-          // suppression N° à Index
-          message += F("Suppression Num index: ");
-          message += String(index);
-          if(modem.deletePhonebookEntry(index)){
-            message += F(" OK");
-          } else { message += F(" KO");}
-        }
-        sendSMSReply(smsstruct.sendernumber, slot);
-      }
-    }
-    else if (gsm && (smsstruct.message == F("LST") || smsstruct.message == F("LST?") || smsstruct.message == F("LST1"))) {	//	Liste des Num Tel
-      messageId();
-      for (byte i = 1; i < 10; i++) {
-        Phone = {"",""};
-        // Serial.print("lecture PB:"),Serial.println(i);
-        if(modem.readPhonebookEntry(&Phone, i)){
-          message += String(i) + ":";
-          message += Phone.number;
-          message += ",";
-          message += Phone.text;
-          message += "\n";
-        } else {
-          i = 10;
-        }
-      }
-      sendSMSReply(smsstruct.sendernumber, slot);// envoi sur plusieurs SMS
-    }
-    else if (smsstruct.message.indexOf(F("ETAT")) == 0 || smsstruct.message.indexOf(F("ST")) == 0) {// "ETAT? de l'installation"
-      generationMessage();
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("SYS")) > -1) {
-      if (gsm) {
-        message += modem.getOperator(); // Operateur
-        byte n = modem.getRegistrationStatus();        
-        if (n == 5) {
-          message += F(("rmg, "));// roaming 1.0s
-        }
-        message += " ";
-        message += ConnectedNetwork();
-        message += fl;
+  if (!(Rmessage.indexOf(F("TEL")) == 0 || Rmessage.indexOf(F("tel")) == 0 || Rmessage.indexOf(F("Tel")) == 0
+      || Rmessage.indexOf(F("Wifi")) == 0 || Rmessage.indexOf(F("WIFI")) == 0 || Rmessage.indexOf(F("wifi")) == 0
+      || Rmessage.indexOf(F("MQTTDATA")) > -1 || Rmessage.indexOf(F("MQTTSERVEUR")) > -1
+      || Rmessage.indexOf(F("GPRSDATA")) > -1 || Rmessage.indexOf(F("FTPDATA")) > -1 || Rmessage.indexOf(F("FTPSERVEUR")) > -1)) {
+    Rmessage.toUpperCase();	// passe tout en Maj sauf si "TEL" ou "WIFI" parametres pouvant contenir minuscules
+    // Rmessage.trim();
+  }
+  Rmessage.replace(" ", "");// supp tous les espaces
 
-        read_RSSI();														// info RSSI seront ajoutées à message
-        
-        message += F("Batt GSM : ");
-        message += String(modem.getBattVoltage());
-        message += F(" mV, ");
-        // message += Batp;
-        // message += F(" %");
-        message += fl;
-      }
-      message += F("Ver: ");
-      message += ver;
-      message += fl;
-      message += F("V Batt Sol= ");
-      message += String(float(TensionBatterie / 100.0));
-      message += F("V, ");
-      if (config.TypeBatt == 16) message += String(BattPBpct(TensionBatterie, 6));
-      if (config.TypeBatt == 24) message += String(BattLiFePopct(TensionBatterie, 4));
-      message += " %";
-      message += fl;
-      message += F("V USB= ");
-      message += (float(VUSB / 1000.0));
-      message += "V";
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("ID=")) == 0) {			//	Id= nouvel Id
-      String temp = smsstruct.message.substring(3);
-      if (temp.length() > 0 && temp.length() < 11) {
-        Id = "";
-        temp.toCharArray(config.Idchar, 11);
-        strncpy(config.sendTopic,("Signalisation/input"),sizeof(config.sendTopic));
-        memcpy(config.receiveTopic,&config.Idchar[5],5);
-        config.receiveTopic[5] = '\0';
-        strcat(config.receiveTopic,"/output");
-        memcpy(config.permanentTopic,&config.Idchar[5],5);
-        config.permanentTopic[5] = '\0';
-        strcat(config.permanentTopic,"/permanent");
+  messageId();
+  if (Rmessage.indexOf(F("TIMEOUTWIFI")) > -1) { // Parametre Arret Wifi
+    if (Rmessage.indexOf(char(61)) == 11) {
+      int n = Rmessage.substring(12, Rmessage.length()).toInt();
+      if (n > 9 && n < 3601) {
+        config.timeoutWifi = n;
         sauvConfig();														// sauvegarde config
-
-        if(config.messageMode == 1){ // changement d'id mqtt
-          mqtt.disconnect();
-          mqttConnect();
-        }
-
-        Id = String(config.Idchar);
-        Id += fl;
       }
+    }
+    message += F("TimeOut Wifi (s) = ");
+    message += config.timeoutWifi;
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("WIFIOFF")) > -1) { // Arret Wifi
+    message += F("Wifi off");
+    message += fl;
+    sendReply(Origine);
+    WifiOff();
+  }
+  else if (Rmessage.indexOf(F("Wifi")) == 0) { // demande connexion Wifi
+    byte pos1 = Rmessage.indexOf(char(44));//","
+    byte pos2 = Rmessage.indexOf(char(44), pos1 + 1);
+    String ssids = Rmessage.substring(pos1 + 1, pos2);
+    String pwds  = Rmessage.substring(pos2 + 1, Rmessage.length());
+    char ssid[25];
+    char pwd[30];
+    ssids.toCharArray(ssid, ssids.length() + 1);
+    ssids.toCharArray(ssid, ssids.length() + 1);
+    pwds.toCharArray(pwd, pwds.length() + 1);
+    ConnexionWifi(ssid, pwd, Origine);
+  }
+  else if (gsm && (Rmessage.indexOf(F("TEL")) == 0
+            || Rmessage.indexOf(F("Tel")) == 0
+            || Rmessage.indexOf(F("tel")) == 0)) { // entrer nouveau num
+    String numero;
+    String nom;
+    byte index = 0;
+    bool FlagOK = true;
+    byte j = 0;
+    bool add = true; // ajouter/modification numero = true, suppression = false
+    // String sendAT	= F("AT+CPBW=");	// ecriture dans le phone book
+    if (Rmessage.indexOf(char(61)) == 4) { // TELn= reserver correction/suppression
+      int i = Rmessage.substring(3).toInt();// recupere n° de ligne
+      i = i / 1; // important sinon i ne prend pas sa valeur dans les comparaison?
+      //Serial.println(i);
+      if (i < 1) FlagOK = false;
+      // sendAT += i;
+      index = i;
+      j = 5;
+      // on efface la ligne sauf la 1 pour toujours garder au moins un numéro
+      if ( (i != 1) && ( Rmessage.indexOf(F("efface")) == 5
+                      || Rmessage.indexOf(F("EFFACE")) == 5 )){
+        add = false;
+        goto fin_tel;
+      }
+    }
+    else if (Rmessage.indexOf(char(61)) == 3) { // TEL= nouveau numero
+      j = 4;
+    }
+    else {
+      FlagOK = false;
+    }
+    if (Rmessage.indexOf("+") == j) {			// debut du num tel +
+      if (Rmessage.indexOf(",") == j + 12) {	// verif si longuer ok
+        numero = Rmessage.substring(j, j + 12);
+        nom    = Rmessage.substring(j + 13, j + 27);	// pas de verif si long<>0?
+        // sendAT += F(",\"");
+        // sendAT += numero;
+        // sendAT += F("\",145,\"");
+        // sendAT += nom;
+        // sendAT += F("\"");
+      }
+      else {
+        FlagOK = false;
+      }
+    }
+    else {
+      FlagOK = false;
+    }
+fin_tel:
+    if (!FlagOK) { // erreur de format
+      //Serial.println(F("false"));
       messageId();
-      message += F("Nouvel Id");
+      message += F("Commande non reconnue ?");// non reconnu
+      sendReply(Origine);						// SMS non reconnu
+    }
+    else {          
+      messageId();
+      if(add){
+        // ajouter N° à index
+        message += F("Nouveau Num Tel: "); // A finir
+        // Serial.println(numero);
+        // Serial.println(nom);
+        // Serial.println(index);
+        // if(modem.addPhonebookEntry(numero,nom,index)){
+        //   message += F("OK");
+        // } else { message += F("KO");}
+        // message += fl;
+        // message += index;
+        // message += ":";
+        // message += numero;
+        // message += ":";
+        // message += nom;
+        // message += fl;
+      } else {
+        // suppression N° à Index
+        message += F("Suppression Num index: ");
+        message += String(index);// A finir
+        // if(modem.deletePhonebookEntry(index)){
+        //   message += F(" OK");
+        // } else { message += F(" KO");}
+      }
+      sendReply(Origine);
+    }
+  }
+  else if (gsm && (Rmessage == F("LST") || Rmessage == F("LST?") || Rmessage == F("LST1"))) {	//	Liste des Num Tel
+    messageId();
+    for (byte i = 1; i < 10; i++) {
+      Phone = {"",""};
+      // Serial.print("lecture PB:"),Serial.println(i);
+      // A finir
+      // if(modem.readPhonebookEntry(&Phone, i)){
+      //   message += String(i) + ":";
+      //   message += Phone.number;
+      //   message += ",";
+      //   message += Phone.text;
+      //   message += "\n";
+      // } else {
+      //   i = 10;
+      // }
+    }
+    sendReply(Origine);// envoi sur plusieurs SMS
+  }
+  else if (Rmessage.indexOf(F("ETAT")) == 0 || Rmessage.indexOf(F("ST")) == 0) {// "ETAT? de l'installation"
+    generationMessage();
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("SYS")) > -1) {
+    if (gsm) {
+      message += modem.getOperator(); // Operateur
+      byte n = modem.getRegistrationStatus();        
+      if (n == 5) {
+        message += F(("rmg, "));// roaming 1.0s
+      }
+      message += " ";
+      message += ConnectedNetwork();
       message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
+
+      read_RSSI();														// info RSSI seront ajoutées à message
+      
+      message += F("Batt GSM : ");
+      message += String(modem.getBattVoltage());
+      message += F(" mV, ");
+      // message += Batp;
+      // message += F(" %");
+      message += fl;
     }
-    else if (smsstruct.message.indexOf(F("LOG")) == 0) {	// demande taille du log
-      File f = SPIFFS.open(filelog, "r"); // taille du fichier log en SPIFFS
-      message = F("local log size :");
-      message += String(f.size()) + fl;
-      f.close();
-      sendSMSReply(smsstruct.sendernumber, slot);
+    message += F("Ver: ");
+    message += ver;
+    message += fl;
+    message += F("V Batt Sol= ");
+    message += String(float(TensionBatterie / 100.0));
+    message += F("V, ");
+    if (config.TypeBatt == 16) message += String(BattPBpct(TensionBatterie, 6));
+    if (config.TypeBatt == 24) message += String(BattLiFePopct(TensionBatterie, 4));
+    message += " %";
+    message += fl;
+    message += F("V USB= ");
+    message += (float(VUSB / 1000.0));
+    message += "V";
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("ID=")) == 0) {			//	Id= nouvel Id
+    String temp = Rmessage.substring(3);
+    if (temp.length() > 0 && temp.length() < 11) {
+      Id = "";
+      temp.toCharArray(config.Idchar, 11);
+      strncpy(config.sendTopic,("Signalisation/input"),sizeof(config.sendTopic));
+      memcpy(config.receiveTopic,&config.Idchar[5],5);
+      config.receiveTopic[5] = '\0';
+      strcat(config.receiveTopic,"/output");
+
+      sauvConfig();														// sauvegarde config
+
+      if(config.messageMode == 1){ // changement d'id mqtt
+        mqtt.disconnect();
+        mqttConnect();
+      }
+
+      Id = String(config.Idchar);
+      Id += fl;
     }
-    else if (smsstruct.message.indexOf(F("ANTICIP")) > -1) { // Anticipation du wakeup
-      if (smsstruct.message.indexOf(char(61)) == 7) {
-        int n = smsstruct.message.substring(8, smsstruct.message.length()).toInt();
-        if (n > 9 && n < 3601) {
-          config.anticip = n;
-          sauvConfig();														// sauvegarde config
+    messageId();
+    message += F("Nouvel Id");
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("LOG")) == 0) {	// demande taille du log
+    File f = SPIFFS.open(filelog, "r"); // taille du fichier log en SPIFFS
+    message = F("local log size :");
+    message += String(f.size()) + fl;
+    f.close();
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("ANTICIP")) > -1) { // Anticipation du wakeup
+    if (Rmessage.indexOf(char(61)) == 7) {
+      int n = Rmessage.substring(8, Rmessage.length()).toInt();
+      if (n > 9 && n < 3601) {
+        config.anticip = n;
+        sauvConfig();														// sauvegarde config
+      }
+    }
+    message += F("Anticipation WakeUp (s) = ");
+    message += config.anticip;
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("DEBUT")) == 0) {     //	Heure Message Vie/debutJour
+    if (Rmessage.indexOf(char(61)) == 5) {
+      long i = atol(Rmessage.substring(6).c_str()); //	Heure message Vie
+      if (i > 0 && i <= 86340) {                    //	ok si entre 0 et 86340(23h59)
+        config.DebutJour = i;
+        sauvConfig();                               // sauvegarde config
+        Alarm.disable(DebutJour);
+        Alarm.write(DebutJour,config.DebutJour);
+        // FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
+        Alarm.enable(DebutJour);
+        AIntru_HeureActuelle();
+      }
+    }
+    message += F("Debut Journee = ");
+    message += Hdectohhmm(config.DebutJour);
+    message += F("(hh:mm)");
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("TIME")) == 0) {
+    message += F("Heure Sys = ");
+    message += displayTime(0);
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("MAJHEURE")) == 0) {	//	forcer mise a l'heure
+    // if (sms) {
+    //   String mytime = smsstruct.timestamp.substring(0, 20);
+    //   // Serial.print(F("heure du sms:")),Serial.println(mytime);
+    //   // String _temp = F("AT+CCLK=\"");
+    //   String _temp = F("+CCLK=\"");
+    //   _temp += mytime + "\"\r\n";
+    //   // Serial.print(_temp);
+    //   modem.send_AT(_temp);
+    //   Alarm.delay(100);
+    //   MajHeure(true);			// mise a l'heure forcée
+    // }
+    // else {
+    //   message += F("pas de mise à l'heure en local");
+    // }
+    MajHeure(true);			// mise a l'heure forcée
+    message += "Mise à l'heure NTP";
+    sendReply(Origine);
+  }
+  else if (gsm && Rmessage.indexOf(F("IMEI")) > -1) {
+    // char imei[15] = {0}; // MUST use a 16 character buffer for IMEI!
+    String modemInfo = modem.getModemInfo(); // IMEI: 862195XXXXXX785
+    byte pos = modemInfo.indexOf(F("IMEI:"));
+    if (pos > 0) {
+      // Serial.print(F("Module IMEI: ")), Serial.println(modemInfo.substring(pos+6, pos+6+15));
+      message += F("IMEI = ");
+      message += modemInfo.substring(pos+6, pos+6+15);
+      sendReply(Origine);
+    }
+  }
+  else if (Rmessage.indexOf(F("FIN")) == 0) {			//	Heure Fin de journée
+    if ((Rmessage.indexOf(char(61))) == 3) {
+      long i = atol(Rmessage.substring(4).c_str()); //	Heure
+      if (i > 0 && i <= 86340) {										//	ok si entre 0 et 86340(23h59)
+        config.FinJour = i;
+        sauvConfig();															// sauvegarde config
+        Alarm.disable(FinJour);
+        Alarm.write(FinJour,config.FinJour);
+        // FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
+        Alarm.enable(FinJour);
+      }
+    }
+    message += F("Fin Journee = ");
+    message += Hdectohhmm(config.FinJour);
+    message += F("(hh:mm)");
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("AUTOF")) == 0) {
+    if ((Rmessage.indexOf(char(61))) == 5) { // =
+      if (Rmessage.substring(6) == "1" || Rmessage.substring(6) == "0") {
+        config.AutoF = Rmessage.substring(6).toInt();
+        sauvConfig();	// sauvegarde config
+      }
+    }
+    message += "AutoF ";
+    if (config.AutoF == 1) {
+      message += "Auto";
+    }
+    else {
+      message += "Manu";
+    }
+    message += fl;
+    message +=  "TempoAutoF (s) = ";
+    message += config.TempoAutoF + fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("TEMPOAUTOF")) == 0) {
+    if ((Rmessage.indexOf(char(61))) == 10) { // =
+      if (Rmessage.substring(11).toInt() > 100 && Rmessage.substring(11).toInt() < 36000) {
+        config.TempoAutoF = Rmessage.substring(11).toInt();
+        sauvConfig();	// sauvegarde config
+      }
+    }
+    message += "AutoF ";
+    if (config.AutoF == 1) {
+      message += F("Auto");
+    }
+    else {
+      message += F("Stop");
+    }
+    message += fl;
+    message +=  "TempoAutoF (s) = ";
+    message += config.TempoAutoF + fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("LUMACTUELLE")) == 0) {
+    message += F("Lum ");
+    if (config.LumAuto) {
+      message += F("Auto");
+    }
+    else {
+      message += F("Manu");
+    }
+    message += fl;
+    message += F("luminosite = ");
+    message += String(Lum);
+    message += F("\nlumlut = ");
+    message += String(lumlut(Lum));
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("LUMAUTO")) == 0) {
+    if ((Rmessage.indexOf(char(61))) == 7) { // =
+      if (Rmessage.substring(8) == "1" || Rmessage.substring(8) == "0") {
+        config.LumAuto = Rmessage.substring(8).toInt();
+        sauvConfig();	// sauvegarde config
+      }
+    }
+    message += F("Luminosite ");
+    if (config.LumAuto) {
+      message += "Auto";
+    }
+    else {
+      message += "Manu";
+    }
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("LUMLUT")) > -1) { // Luminosité Look Up Table
+    // format valeur de luminosité Feux pour chaque valeur luminosite ambiante
+    // de 100 à 0 pas de 10
+    // LUMLUT=95,90,80,75,60,50,40,30,30,30,30
+    bool flag = true; // validation du format
+    byte nv = 0; // compteur virgule
+    byte p1 = 0; // position virgule
+    if (Rmessage.indexOf("{") == 0) { // json
+      JsonDocument doc;
+      int f = Rmessage.lastIndexOf("}");
+      // Serial.print("pos }:"),Serial.println(f);
+      // Serial.print("json:"),Serial.print(Rmessage.substring(0,f+1)),Serial.println(".");
+      DeserializationError err = deserializeJson(doc, Rmessage.substring(0, f + 1));
+      if(!err){
+        JsonArray LUMLUT = doc["LUMLUT"];
+        for (int i = 0; i < 11; i++) {
+          TableLum[i][1] = LUMLUT[i];
         }
       }
-      message += F("Anticipation WakeUp (s) = ");
-      message += config.anticip;
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("DEBUT")) == 0) {     //	Heure Message Vie/debutJour
-      if (smsstruct.message.indexOf(char(61)) == 5) {
-        long i = atol(smsstruct.message.substring(6).c_str()); //	Heure message Vie
-        if (i > 0 && i <= 86340) {                    //	ok si entre 0 et 86340(23h59)
-          config.DebutJour = i;
-          sauvConfig();                               // sauvegarde config
-          Alarm.disable(DebutJour);
-          Alarm.write(DebutJour,config.DebutJour);
-          // FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
-          Alarm.enable(DebutJour);
-          AIntru_HeureActuelle();
-        }
+      else{
+        flag = false; // erreur json
       }
-      message += F("Debut Journee = ");
-      message += Hdectohhmm(config.DebutJour);
-      message += F("(hh:mm)");
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
     }
-    else if (smsstruct.message.indexOf(F("TIME")) == 0) {
-      message += F("Heure Sys = ");
-      message += displayTime(0);
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("MAJHEURE")) == 0) {	//	forcer mise a l'heure
-      if (sms) {
-          String mytime = smsstruct.timestamp.substring(0, 20);
-          // Serial.print(F("heure du sms:")),Serial.println(mytime);
-          // String _temp = F("AT+CCLK=\"");
-          String _temp = F("+CCLK=\"");
-          _temp += mytime + "\"\r\n";
-          // Serial.print(_temp);
-          modem.send_AT(_temp);
-          Alarm.delay(100);
-          MajHeure(true);			// mise a l'heure forcée
-        }
+    else if ((Rmessage.indexOf(char(61))) == 6) { // =
+      Sbidon = Rmessage.substring(7, Rmessage.length());
+      for (int i = 0; i < Sbidon.length(); i++) {
+        p1 = Sbidon.indexOf(char(44), p1 + 1); // ,
+        if ((p1 > 0 && p1 < 255)) {
+          nv ++;
+          if (nv == 10)break;
+        } 
         else {
-          message += F("pas de mise à l'heure en local");
+          flag = false;
         }
-        sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (gsm && smsstruct.message.indexOf(F("IMEI")) > -1) {
-      // char imei[15] = {0}; // MUST use a 16 character buffer for IMEI!
-      String modemInfo = modem.getModemInfo(); // IMEI: 862195XXXXXX785
-      byte pos = modemInfo.indexOf(F("IMEI:"));
-      if (pos > 0) {
-        // Serial.print(F("Module IMEI: ")), Serial.println(modemInfo.substring(pos+6, pos+6+15));
-        message += F("IMEI = ");
-        message += modemInfo.substring(pos+6, pos+6+15);
-        sendSMSReply(smsstruct.sendernumber, slot);
+        // Serial.printf("%s%d,%s%d\n","p1=",p1,"flag=",flag);
+      }
+      // Serial.print("flag="),Serial.println(flag);
+      // }
+      // else {
+      // flag = false;
+      // }
+      if (flag) { // format ok
+        p1 = 0;
+        byte p2 = 0;
+        for (int i = 0; i < 11; i++) {
+          p2 = Sbidon.indexOf(char(44), p1 + 1); // ,
+          TableLum[i][1] = Sbidon.substring(p1, p2).toInt();
+          // Serial.printf("%s%d,%s%d\n","p1=",p1,"p2=",p2);
+          p1 = p2 + 1;
+          TableLum[i][0] = 100 - i * 10;
+          if (!(TableLum[i][1] >= 0 && TableLum[i][1] < 101)) flag = false;
+          // Serial.printf("%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
+        }
       }
     }
-    else if (smsstruct.message.indexOf(F("FIN")) == 0) {			//	Heure Fin de journée
-      if ((smsstruct.message.indexOf(char(61))) == 3) {
-        long i = atol(smsstruct.message.substring(4).c_str()); //	Heure
-        if (i > 0 && i <= 86340) {										//	ok si entre 0 et 86340(23h59)
-          config.FinJour = i;
+    if (flag) { // données OK on enregistre
+      EnregistreLumLUT();
+    }
+    else { // données KO on enregistre pas, et on relie les données en mémoire
+      OuvrirLumLUT();
+    }
+    if (smsserveur || !sms) {
+      // si serveur reponse json
+      JsonDocument doc;
+      JsonArray lumlut = doc["lumlut"].to<JsonArray>();
+      for (int i = 0; i < 11; i++) {
+        lumlut.add(TableLum[i][1]);
+      }
+      String jsonbidon;
+      serializeJson(doc, jsonbidon);
+      message += jsonbidon;
+    } else {
+      message += F("Table Luminosite (%)\n");
+      char bid[10];// 1 ligne
+      for (int i = 0; i < 11; i++) {
+        sprintf(bid, "%03d,%03d\n", TableLum[i][0], TableLum[i][1]);
+        message += String(bid);
+      }
+    }
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("MOIS")) > -1) { // Calendrier pour un mois
+    /* mise a jour calendrier ;format : MOIS=mm,31 fois 0/1
+      demande calendrier pour un mois donné ; format : MOIS=mm? */
+    bool flag = true; // validation du format
+    bool W = true; // true Write, false Read
+    int m = 0;
+    if (Rmessage.indexOf("{") == 0) { // json
+      JsonDocument doc;
+      int f = Rmessage.lastIndexOf("}");
+      DeserializationError err = deserializeJson(doc, Rmessage.substring(0, f + 1));
+      if(!err){
+        m = doc["MOIS"]; // 12
+        JsonArray jour = doc["JOUR"];
+        for (int j = 1; j < 32; j++) {
+          calendrier[m][j] = jour[j - 1];
+        }
+        // Serial.print("mois:"),Serial.println(m);
+        EnregistreCalendrier(); // Sauvegarde en SPIFFS
+      }
+      else{
+        message += " erreur json ";
+        flag = false;
+      }
+    }
+    else { // message normal mois=12,31*0/1
+      byte p1 = Rmessage.indexOf(char(61)); // =
+      byte p2 = Rmessage.indexOf(char(44)); // ,
+      if (p2 == 255) {                      // pas de ,
+        p2 = Rmessage.indexOf(char(63));    // ?
+        W = false;
+      }
+
+      m = Rmessage.substring(p1 + 1, p2).toInt(); // mois
+      if (!(m > 0 && m < 13)) flag = false;
+      if (W && flag) { // Write
+        if (!(Rmessage.substring(p2 + 1, Rmessage.length()).length() == 31)) flag = false; // si longueur = 31(jours)
+
+        for (int i = 1; i < 32; i++) { // verification 0/1
+          if (!(Rmessage.substring(p2 + i, p2 + i + 1) == "0" || Rmessage.substring(p2 + i, p2 + i + 1) == "1")) {
+            flag = false;
+          }
+        }
+        if (flag) {
+          // Serial.println(F("mise a jour calendrier"));
+          for (int i = 1; i < 32; i++) {
+            calendrier[m][i] = Rmessage.substring(p2 + i, p2 + i + 1).toInt();
+            // Serial.print(Rmessage.substring(p2+i,p2+i+1));
+          }
+          EnregistreCalendrier(); // Sauvegarde en SPIFFS
+        }
+      }
+      if(!flag) {
+        // printf("flag=%d,W=%d\n",flag,W);
+        message += " erreur format ";
+      }
+    }
+    if (flag) { // demande calendrier pour un mois donné
+      if (smsserveur || !sms) {
+        // si serveur reponse json  {"mois":12,"jour":[1,2,4,5,6 .. 31]}
+        JsonDocument doc;
+        doc["mois"] = m;
+        JsonArray jour = doc["jour"].to<JsonArray>();
+        for (int i = 1; i < 32; i++) {
+          jour.add(calendrier[m][i]);
+        }
+        String jsonbidon;
+        serializeJson(doc, jsonbidon);
+        message += jsonbidon;
+      }
+      else {
+        message += F("mois = ");
+        message += m;
+        message += fl;
+        for (int i = 1; i < 32 ; i++) {
+          message += calendrier[m][i];
+          if ((i % 5)  == 0) message += " ";
+          if ((i % 10) == 0) message += fl;
+        }
+      }
+    }
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage == F("CIRCULE")) {
+    bool ok = false;
+    /* demande passer en mode Circulé pour le jour courant,
+      sans modification calendrier enregistré en SPIFFS */
+    if (!(calendrier[month()][day()] ^ flagCircule)) {
+      // calendrier[month()][day()] = 1;
+      message += F("OK, Circule");
+      flagCircule = !flagCircule;
+      ok = true;
+    }
+    else {
+      message += F("Jour deja Circule");
+    }
+    message += fl;
+    sendReply(Origine);
+    if (ok) {
+      // if (sms)EffaceSMS(slot);
+      SignalVie();
+      // action_wakeup_reason(4);
+    }
+  }
+  else if (Rmessage == F("NONCIRCULE")) {
+    bool ok = false;
+    /* demande passer en mode nonCirculé pour le jour courant,
+      sans modification calendrier enregistré en SPIFFS 
+      extinction Feux*/
+    if (calendrier[month()][day()] ^ flagCircule) {
+      // calendrier[month()][day()] = 0;
+      message += F("OK, NonCircule");
+      flagCircule = !flagCircule;
+      ok = true;
+    }
+    else {
+      message += F("Jour deja NonCircule");
+    }
+    message += fl;
+    sendReply(Origine);
+    if (ok) {
+      // if (sms){
+      //   EffaceSMS(slot);
+      // }
+      Extinction();
+      action_wakeup_reason(4);
+    }
+  }
+  else if (Rmessage.indexOf(F("TEMPOWAKEUP")) == 0) { // Tempo wake up
+    if ((Rmessage.indexOf(char(61))) == 11) {
+      int i = Rmessage.substring(12).toInt(); //	durée
+      if (i > 59 && i <= 36000) { // 1mn à 10H
+        config.RepeatWakeUp = i;
+        sauvConfig();															// sauvegarde config
+      }
+    }
+    message += F("Tempo repetition Wake up (s)=");
+    message += config.RepeatWakeUp;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("LST2")) > -1) { //	Liste restreinte	//  =LST2=0,0,0,0,0,0,0,0,0
+    bool flag = true; // validation du format
+    if (Rmessage.indexOf(char(61)) == 4) { // "="
+      byte Num[10];
+      Sbidon = Rmessage.substring(5, 22);
+      // Serial.print("bidon="),Serial.print(Sbidon),Serial.print("="),Serial.println(Sbidon.length());
+      if (Sbidon.length() == 17) {
+        int j = 1;
+        for (int i = 0; i < 17; i += 2) {
+          if (i == 16 && (Sbidon.substring(i, i + 1) == "0"	|| Sbidon.substring(i, i + 1) == "1")) {
+            Num[j] = Sbidon.substring(i, i + 1).toInt();
+          }
+          else if ((Sbidon.substring(i + 1, i + 2) == ",") && (Sbidon.substring(i, i + 1) == "0"	|| Sbidon.substring(i, i + 1) == "1")) {
+            //Serial.print(",="),Serial.println(bidon.substring(i+1,i+2));
+            //Serial.print("X="),Serial.println(bidon.substring(i,i+1));
+            Num[j] = Sbidon.substring(i, i + 1).toInt();
+            //Serial.print(i),Serial.print(","),Serial.print(j),Serial.print(","),Serial.println(Num[j]);
+            j++;
+          }
+          else {
+            Serial.println(F("Format pas reconnu"));
+            flag = false;
+          }
+        }
+        if (flag) {
+          //Serial.println("copie des num");
+          for (int i = 1; i < 10; i++) {
+            config.Pos_Pn_PB[i] = Num[i];
+          }
           sauvConfig();															// sauvegarde config
+        }
+      }
+    }
+    message += F("Liste restreinte");
+    message += fl;
+    for (int i = 1; i < 10; i++) {
+      message += config.Pos_Pn_PB[i];
+      if ( i < 9) message += char(44); // ,
+    }
+    sendReply(Origine);
+  }
+  else if (Rmessage == F("RST")) {               // demande RESET
+    message += F("Le systeme va etre relance");  // apres envoie du SMS!
+    message += fl;
+    FlagReset = true;                            // reset prochaine boucle
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("CALIBRATION=")) == 0) {
+    /* 	Mode calibration mesure tension
+        recoit message "CALIBRATION=.X"
+        entrer mode calibration
+        Selection de la tenssion à calibrer X
+        X = 1 TensionBatterie : PinBattSol : CoeffTension1
+        X = 2 VBatterieProc : PinBattProc : CoeffTension2
+        X = 3 VUSB : PinBattUSB : CoeffTension3
+        X = 4 Tension24 : Pin24V : CoeffTension4
+        effectue mesure tension avec CoeffTensionDefaut retourne et stock resultat
+        recoit message "CALIBRATION=1250" mesure réelle en V*100
+        calcul nouveau coeff = mesure reelle/resultat stocké * CoeffTensionDefaut
+        applique nouveau coeff
+        stock en SPIFFS
+        sort du mode calibration
+
+        variables
+        FlagCalibration true cal en cours, false par defaut
+        Static P pin d'entrée
+        static int tensionmemo memorisation de la premiere tension mesurée en calibration
+        int CoeffTension = CoeffTensionDefaut 7000 par défaut
+    */
+    Sbidon = Rmessage.substring(12, 16); // texte apres =
+    //Serial.print(F("Sbidon=")),Serial.print(Sbidon),Serial.print(char(44)),Serial.println(Sbidon.length());
+    long tension = 0;
+    if (Sbidon.substring(0, 1) == "." && Sbidon.length() > 1) { // debut mode cal
+      if (Sbidon.substring(1, 2) == "1" ) {
+        M = 1;
+        P = PinBattSol;
+        coef = CoeffTension[0];
+      }
+      if (Sbidon.substring(1, 2) == "2" ) {
+        M = 2;
+        P = PinBattProc;
+        coef = CoeffTension[1];
+      }
+      if (Sbidon.substring(1, 2) == "3" ) {
+        M = 3;
+        P = PinBattUSB;
+        coef = CoeffTension[2];
+      }
+      if (Sbidon.substring(1, 2) == "4" ) {
+        if(!Allume)digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
+        for (int i = 0; i < 5 ; i++) {
+          read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V, PinLum); // lecture des adc
+          Alarm.delay(100);
+        }
+        M = 4;
+        P = Pin24V;
+        coef = CoeffTension[3];
+      }
+      Serial.print("mode = "), Serial.print(M), Serial.println(Sbidon.substring(1, 2));
+      FlagCalibration = true;
+
+      coef = CoeffTensionDefaut;
+      tension = map(adc_mm[M-1] / nSample, 0, 4095, 0, coef);
+      // tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
+      // Serial.print("TensionBatterie = "),Serial.println(TensionBatterie);
+      tensionmemo = tension;
+    }
+    else if (FlagCalibration && Sbidon.substring(0, 4).toInt() > 0 && Sbidon.substring(0, 4).toInt() <= 8000) {
+      // si Calibration en cours et valeur entre 0 et 5000
+      Serial.println(Sbidon.substring(0, 4));
+      /* calcul nouveau coeff */
+      coef = Sbidon.substring(0, 4).toFloat() / float(tensionmemo) * CoeffTensionDefaut;
+      // Serial.print("Coeff Tension = "),Serial.println(coef);
+      tension = map(adc_mm[M-1] / nSample, 0, 4095, 0, coef);
+      // tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
+      CoeffTension[M - 1] = coef;
+      FlagCalibration = false;
+      Recordcalib();														// sauvegarde en SPIFFS
+
+      if (M == 4 && !Allume) {
+        digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
+      }
+    }
+    else {
+      message += F("message non reconnu");
+      message += fl;
+      FlagCalibration = false;
+    }
+    message += F("Mode Calib Tension ");
+    message += String(M) + fl;
+    message += F("TensionMesuree = ");
+    message += tension;
+    message += fl;
+    message += F("Coeff Tension = ");
+    message += coef;
+    if (M == 1) {
+      message += fl;
+      message += F("Batterie = ");
+      if(config.TypeBatt == 16) message += String(BattPBpct(tension, 6));
+      if(config.TypeBatt == 24) message += String(BattLiFePopct(tension, 4));
+      message += "%";
+    }
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(Id.substring(5, 9)) == 1) { // cherche CVXX
+    if (Rmessage.indexOf("D") == 0) {
+      Extinction(); // Violet 0, Blanc 0
+      MajLog(Origine, "DCV");
+    }
+    else if (Rmessage.indexOf("F") == 0) {
+      if(Feux < 5 || Feux == 7){ // si Carré fermé ne rien faire
+        EffaceAlaCdeFBlc();
+        Feux = 1;
+        Allumage(); // Violet 1, Blanc 0
+        MajLog(Origine, "FCV");
+      }
+    }
+    else if(Rmessage.indexOf("O") == 0 || Rmessage.indexOf("M") == 0 || Rmessage.indexOf("S") == 0 || Rmessage.indexOf("V") == 0){
+      if(FlagTqt_1){ // taquet ouvert
+        if (Rmessage.indexOf("O") == 0) {
+          EffaceAlaCdeFBlc();
+          Feux = 2;
+          Allumage(); // Violet 0, Blanc 1
+          MajLog(Origine, "OCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        }
+        else if (Rmessage.indexOf("M") == 0) {
+          EffaceAlaCdeFBlc();
+          Feux = 3;
+          Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
+          MajLog(Origine, "MCV");
+          // if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        }
+        else if (Rmessage.indexOf("S") == 0) {
+          EffaceAlaCdeFBlc();
+          Feux = 4;
+          Allumage(); // Violet 0, Blanc Secteur Cli rapide
+          MajLog(Origine, "SCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        }
+        else if (Rmessage.indexOf("V") == 0) {
+          EffaceAlaCdeFBlc();
+          Feux = 7;
+          Allumage(); // Violet Cli, Blanc 0
+          MajLog(Origine, "VCV");
+          if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
+        }
+      } else { // taquet fermé
+        FlagDemande_Feux = true;
+        Memo_Demande_Feux[0] = Origine;      // nom demandeur
+        Memo_Demande_Feux[1] = Origine;   // num demandeur
+        Memo_Demande_Feux[2] = Rmessage; // demande d'origine
+        Feux = 5; // Violet 1, Blanc 0
+        MajLog(Origine, "CCV demande : " + Rmessage);
+        // Serial.println("memo demande feux :");
+        // Serial.println(Memo_Demande_Feux[0]);
+        // Serial.println(Memo_Demande_Feux[1]);
+        // Serial.println(Memo_Demande_Feux[2]);
+      }
+    }
+    else {
+      // message += "non reconnu" + fl;
+    }
+    generationMessage();
+    if (Feux != 0) { // seulement si different de DCV, doublon DCV envoie automatiquement une reponse dans Extinction()
+      envoieGroupeMessage(0); // envoie serveur // A finir
+    }
+    // evite de repondre 2 fois au serveur
+    if (!smsserveur)sendReply(Origine); // reponse si pas serveur
+  }
+  else if (Rmessage.indexOf(F("FBLCPWM")) == 0) {
+    if (Rmessage.substring(7, 8) == "=") {
+      int i = Rmessage.substring(8, Rmessage.length()).toInt();
+      if (i > 4 && i < 101) {
+        config.FBlcPWM = i;
+        sauvConfig();
+      }
+    }
+    // Allumage();
+    message += "Blanc PWM =";
+    message += config.FBlcPWM;
+    message += "%";
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("FVLTPWM")) == 0) {
+    if (Rmessage.substring(7, 8) == "=") {
+      int i = Rmessage.substring(8, Rmessage.length()).toInt();
+      if (i > 4 && i < 101) {
+        config.FVltPWM = i;
+        sauvConfig();
+      }
+    }
+    // Allumage();
+    message += "Violet PWM =";
+    message += config.FVltPWM;
+    message += "%";
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("SLOWBLINKER")) == 0) {
+    if (Rmessage.substring(11, 12) == "=") {
+      int i = Rmessage.substring(12, Rmessage.length()).toInt();
+      if (i > 199 && i < 2001) {
+        config.SlowBlinker = i;
+        sauvConfig();
+      }
+    }
+    // Allumage();
+    message += "SlowBlinker =";
+    message += config.SlowBlinker;
+    message += "ms";
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("FASTBLINKER")) == 0) {
+    if (Rmessage.substring(11, 12) == "=") {
+      int i = Rmessage.substring(12, Rmessage.length()).toInt();
+      if (i > 149 && i < 2001) {
+        config.FastBlinker = i;
+        sauvConfig();
+      }
+    }
+    // Allumage();
+    message += "FastBlinker =";
+    message += config.FastBlinker;
+    message += "ms";
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("FASTRATER")) == 0) {
+    if (Rmessage.substring(9, 10) == "=") {
+      int i = Rmessage.substring(10, Rmessage.length()).toInt();
+      if (i > 999 && i < 3001) {
+        config.FastRater = i;
+        sauvConfig();
+      }
+    }
+    // Allumage();
+    message += "FastRater =";
+    message += config.FastRater;
+    message += "ms";
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("PARAM")) >= 0) {
+    //message param divisé en 2 trop long depasse long 1sms 160c
+    bool erreur = false;
+    // Serial.print("position X:"),Serial.println(Rmessage.substring(7, 8));
+    if(Rmessage.substring(7, 8) == "1"){ // PARAM1
+    // Serial.print("position ::"),Serial.println(Rmessage.substring(9, 10));
+      if (Rmessage.substring(9, 10) == ":") {
+        // json en reception sans lumlut
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, Rmessage);
+        if(err){
+          erreur = true;
+        }
+        else{
+          // Serial.print(F("Deserialization succeeded"));
+          JsonObject param = doc["PARAM1"];
+          config.SlowBlinker = param["SLOWBLINKER"];
+          config.FastBlinker = param["FASTBLINKER"];
+          config.FastRater = param["FASTRATER"];
+          config.DebutJour = Hhmmtohdec(param["DEBUT"]);
+          config.FinJour = Hhmmtohdec(param["FIN"]);
+          sauvConfig();
           Alarm.disable(FinJour);
           Alarm.write(FinJour,config.FinJour);
           // FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
           Alarm.enable(FinJour);
+          Alarm.disable(DebutJour);
+          Alarm.write(DebutJour,config.DebutJour);
+          // FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
+          Alarm.enable(DebutJour);
         }
-      }
-      message += F("Fin Journee = ");
-      message += Hdectohhmm(config.FinJour);
-      message += F("(hh:mm)");
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("AUTOF")) == 0) {
-      if ((smsstruct.message.indexOf(char(61))) == 5) { // =
-        if (smsstruct.message.substring(6) == "1" || smsstruct.message.substring(6) == "0") {
-          config.AutoF = smsstruct.message.substring(6).toInt();
-          sauvConfig();	// sauvegarde config
-        }
-      }
-      message += "AutoF ";
-      if (config.AutoF == 1) {
-        message += "Auto";
-      }
-      else {
-        message += "Manu";
-      }
-      message += fl;
-      message +=  "TempoAutoF (s) = ";
-      message += config.TempoAutoF + fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("TEMPOAUTOF")) == 0) {
-      if ((smsstruct.message.indexOf(char(61))) == 10) { // =
-        if (smsstruct.message.substring(11).toInt() > 100 && smsstruct.message.substring(11).toInt() < 36000) {
-          config.TempoAutoF = smsstruct.message.substring(11).toInt();
-          sauvConfig();	// sauvegarde config
-        }
-      }
-      message += "AutoF ";
-      if (config.AutoF == 1) {
-        message += F("Auto");
-      }
-      else {
-        message += F("Stop");
-      }
-      message += fl;
-      message +=  "TempoAutoF (s) = ";
-      message += config.TempoAutoF + fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("LUMACTUELLE")) == 0) {
-      message += F("Lum ");
-      if (config.LumAuto) {
-        message += F("Auto");
-      }
-      else {
-        message += F("Manu");
-      }
-      message += fl;
-      message += F("luminosite = ");
-      message += String(Lum);
-      message += F("\nlumlut = ");
-      message += String(lumlut(Lum));
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("LUMAUTO")) == 0) {
-      if ((smsstruct.message.indexOf(char(61))) == 7) { // =
-        if (smsstruct.message.substring(8) == "1" || smsstruct.message.substring(8) == "0") {
-          config.LumAuto = smsstruct.message.substring(8).toInt();
-          sauvConfig();	// sauvegarde config
-        }
-      }
-      message += F("Luminosite ");
-      if (config.LumAuto) {
-        message += "Auto";
-      }
-      else {
-        message += "Manu";
-      }
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("LUMLUT")) > -1) { // Luminosité Look Up Table
-      // format valeur de luminosité Feux pour chaque valeur luminosite ambiante
-      // de 100 à 0 pas de 10
-      // LUMLUT=95,90,80,75,60,50,40,30,30,30,30
-      bool flag = true; // validation du format
-      byte nv = 0; // compteur virgule
-      byte p1 = 0; // position virgule
-      if (smsstruct.message.indexOf("{") == 0) { // json
-        DynamicJsonDocument doc(200);
-        int f = smsstruct.message.lastIndexOf("}");
-        // Serial.print("pos }:"),Serial.println(f);
-        // Serial.print("json:"),Serial.print(smsstruct.message.substring(0,f+1)),Serial.println(".");
-        DeserializationError err = deserializeJson(doc, smsstruct.message.substring(0, f + 1));
-        if(!err){
-          JsonArray LUMLUT = doc["LUMLUT"];
-          for (int i = 0; i < 11; i++) {
-            TableLum[i][1] = LUMLUT[i];
-          }
-        }
-        else{
-          flag = false; // erreur json
-        }
-      }
-      else if ((smsstruct.message.indexOf(char(61))) == 6) { // =
-        Sbidon = smsstruct.message.substring(7, smsstruct.message.length());
-        for (int i = 0; i < Sbidon.length(); i++) {
-          p1 = Sbidon.indexOf(char(44), p1 + 1); // ,
-          if ((p1 > 0 && p1 < 255)) {
-            nv ++;
-            if (nv == 10)break;
-          } 
-          else {
-            flag = false;
-          }
-          // Serial.printf("%s%d,%s%d\n","p1=",p1,"flag=",flag);
-        }
-        // Serial.print("flag="),Serial.println(flag);
-        // }
-        // else {
-        // flag = false;
-        // }
-        if (flag) { // format ok
-          p1 = 0;
-          byte p2 = 0;
-          for (int i = 0; i < 11; i++) {
-            p2 = Sbidon.indexOf(char(44), p1 + 1); // ,
-            TableLum[i][1] = Sbidon.substring(p1, p2).toInt();
-            // Serial.printf("%s%d,%s%d\n","p1=",p1,"p2=",p2);
-            p1 = p2 + 1;
-            TableLum[i][0] = 100 - i * 10;
-            if (!(TableLum[i][1] >= 0 && TableLum[i][1] < 101)) flag = false;
-            // Serial.printf("%03d,%03d\n",TableLum[i][0],TableLum[i][1]);
-          }
-        }
-      }
-      if (flag) { // données OK on enregistre
-        EnregistreLumLUT();
-      }
-      else { // données KO on enregistre pas, et on relie les données en mémoire
-        OuvrirLumLUT();
-      }
-      if (smsserveur || !sms) {
-        // si serveur reponse json
-        DynamicJsonDocument doc(200);
-        JsonArray lumlut = doc.createNestedArray("lumlut");
-        for (int i = 0; i < 11; i++) {
-          lumlut.add(TableLum[i][1]);
-        }
-        String jsonbidon;
-        serializeJson(doc, jsonbidon);
-        message += jsonbidon;
-      } else {
-        message += F("Table Luminosite (%)\n");
-        char bid[10];// 1 ligne
-        for (int i = 0; i < 11; i++) {
-          sprintf(bid, "%03d,%03d\n", TableLum[i][0], TableLum[i][1]);
-          message += String(bid);
-        }
-      }
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("MOIS")) > -1) { // Calendrier pour un mois
-      /* mise a jour calendrier ;format : MOIS=mm,31 fois 0/1
-        demande calendrier pour un mois donné ; format : MOIS=mm? */
-      bool flag = true; // validation du format
-      bool W = true; // true Write, false Read
-      int m = 0;
-      if (smsstruct.message.indexOf("{") == 0) { // json
-        DynamicJsonDocument doc(540);
-        int f = smsstruct.message.lastIndexOf("}");
-        DeserializationError err = deserializeJson(doc, smsstruct.message.substring(0, f + 1));
-        if(!err){
-          m = doc["MOIS"]; // 12
-          JsonArray jour = doc["JOUR"];
-          for (int j = 1; j < 32; j++) {
-            calendrier[m][j] = jour[j - 1];
-          }
-          // Serial.print("mois:"),Serial.println(m);
-          EnregistreCalendrier(); // Sauvegarde en SPIFFS
-        }
-        else{
-          message += " erreur json ";
-          flag = false;
-        }
-      }
-      else { // message normal mois=12,31*0/1
-        byte p1 = smsstruct.message.indexOf(char(61)); // =
-        byte p2 = smsstruct.message.indexOf(char(44)); // ,
-        if (p2 == 255) {                      // pas de ,
-          p2 = smsstruct.message.indexOf(char(63));    // ?
-          W = false;
-        }
-
-        m = smsstruct.message.substring(p1 + 1, p2).toInt(); // mois
-        if (!(m > 0 && m < 13)) flag = false;
-        if (W && flag) { // Write
-          if (!(smsstruct.message.substring(p2 + 1, smsstruct.message.length()).length() == 31)) flag = false; // si longueur = 31(jours)
-
-          for (int i = 1; i < 32; i++) { // verification 0/1
-            if (!(smsstruct.message.substring(p2 + i, p2 + i + 1) == "0" || smsstruct.message.substring(p2 + i, p2 + i + 1) == "1")) {
-              flag = false;
-            }
-          }
-          if (flag) {
-            // Serial.println(F("mise a jour calendrier"));
-            for (int i = 1; i < 32; i++) {
-              calendrier[m][i] = smsstruct.message.substring(p2 + i, p2 + i + 1).toInt();
-              // Serial.print(smsstruct.message.substring(p2+i,p2+i+1));
-            }
-            EnregistreCalendrier(); // Sauvegarde en SPIFFS
-          }
-        }
-        if(!flag) {
-          // printf("flag=%d,W=%d\n",flag,W);
-          message += " erreur format ";
-        }
-      }
-      if (flag) { // demande calendrier pour un mois donné
-        if (smsserveur || !sms) {
-          // si serveur reponse json  {"mois":12,"jour":[1,2,4,5,6 .. 31]}
-          DynamicJsonDocument doc(540);
-          doc["mois"] = m;
-          JsonArray jour = doc.createNestedArray("jour");
-          for (int i = 1; i < 32; i++) {
-            jour.add(calendrier[m][i]);
-          }
-          String jsonbidon;
-          serializeJson(doc, jsonbidon);
-          message += jsonbidon;
-        }
-        else {
-          message += F("mois = ");
-          message += m;
-          message += fl;
-          for (int i = 1; i < 32 ; i++) {
-            message += calendrier[m][i];
-            if ((i % 5)  == 0) message += " ";
-            if ((i % 10) == 0) message += fl;
-          }
-        }
-      }
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message == F("CIRCULE")) {
-      bool ok = false;
-      /* demande passer en mode Circulé pour le jour courant,
-        sans modification calendrier enregistré en SPIFFS */
-      if (!(calendrier[month()][day()] ^ flagCircule)) {
-        // calendrier[month()][day()] = 1;
-        message += F("OK, Circule");
-        flagCircule = !flagCircule;
-        ok = true;
-      }
-      else {
-        message += F("Jour deja Circule");
-      }
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-      if (ok) {
-        // if (sms)EffaceSMS(slot);
-        SignalVie();
-        // action_wakeup_reason(4);
-      }
-    }
-    else if (smsstruct.message == F("NONCIRCULE")) {
-      bool ok = false;
-      /* demande passer en mode nonCirculé pour le jour courant,
-        sans modification calendrier enregistré en SPIFFS 
-        extinction Feux*/
-      if (calendrier[month()][day()] ^ flagCircule) {
-        // calendrier[month()][day()] = 0;
-        message += F("OK, NonCircule");
-        flagCircule = !flagCircule;
-        ok = true;
-      }
-      else {
-        message += F("Jour deja NonCircule");
-      }
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-      if (ok) {
-        // if (sms){
-        //   EffaceSMS(slot);
-        // }
-        Extinction();
-        action_wakeup_reason(4);
-      }
-    }
-    else if (smsstruct.message.indexOf(F("TEMPOWAKEUP")) == 0) { // Tempo wake up
-      if ((smsstruct.message.indexOf(char(61))) == 11) {
-        int i = smsstruct.message.substring(12).toInt(); //	durée
-        if (i > 59 && i <= 36000) { // 1mn à 10H
-          config.RepeatWakeUp = i;
-          sauvConfig();															// sauvegarde config
-        }
-      }
-      message += F("Tempo repetition Wake up (s)=");
-      message += config.RepeatWakeUp;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("LST2")) > -1) { //	Liste restreinte	//  =LST2=0,0,0,0,0,0,0,0,0
-      bool flag = true; // validation du format
-      if (smsstruct.message.indexOf(char(61)) == 4) { // "="
-        byte Num[10];
-        Sbidon = smsstruct.message.substring(5, 22);
-        // Serial.print("bidon="),Serial.print(Sbidon),Serial.print("="),Serial.println(Sbidon.length());
-        if (Sbidon.length() == 17) {
-          int j = 1;
-          for (int i = 0; i < 17; i += 2) {
-            if (i == 16 && (Sbidon.substring(i, i + 1) == "0"	|| Sbidon.substring(i, i + 1) == "1")) {
-              Num[j] = Sbidon.substring(i, i + 1).toInt();
-            }
-            else if ((Sbidon.substring(i + 1, i + 2) == ",") && (Sbidon.substring(i, i + 1) == "0"	|| Sbidon.substring(i, i + 1) == "1")) {
-              //Serial.print(",="),Serial.println(bidon.substring(i+1,i+2));
-              //Serial.print("X="),Serial.println(bidon.substring(i,i+1));
-              Num[j] = Sbidon.substring(i, i + 1).toInt();
-              //Serial.print(i),Serial.print(","),Serial.print(j),Serial.print(","),Serial.println(Num[j]);
-              j++;
-            }
-            else {
-              Serial.println(F("Format pas reconnu"));
-              flag = false;
-            }
-          }
-          if (flag) {
-            //Serial.println("copie des num");
-            for (int i = 1; i < 10; i++) {
-              config.Pos_Pn_PB[i] = Num[i];
-            }
-            sauvConfig();															// sauvegarde config
-          }
-        }
-      }
-      message += F("Liste restreinte");
-      message += fl;
-      for (int i = 1; i < 10; i++) {
-        message += config.Pos_Pn_PB[i];
-        if ( i < 9) message += char(44); // ,
-      }
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message == F("RST")) {               // demande RESET
-      message += F("Le systeme va etre relance");  // apres envoie du SMS!
-      message += fl;
-      FlagReset = true;                            // reset prochaine boucle
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("CALIBRATION=")) == 0) {
-      /* 	Mode calibration mesure tension
-          recoit message "CALIBRATION=.X"
-          entrer mode calibration
-          Selection de la tenssion à calibrer X
-          X = 1 TensionBatterie : PinBattSol : CoeffTension1
-          X = 2 VBatterieProc : PinBattProc : CoeffTension2
-          X = 3 VUSB : PinBattUSB : CoeffTension3
-          X = 4 Tension24 : Pin24V : CoeffTension4
-          effectue mesure tension avec CoeffTensionDefaut retourne et stock resultat
-          recoit message "CALIBRATION=1250" mesure réelle en V*100
-          calcul nouveau coeff = mesure reelle/resultat stocké * CoeffTensionDefaut
-          applique nouveau coeff
-          stock en SPIFFS
-          sort du mode calibration
-
-          variables
-          FlagCalibration true cal en cours, false par defaut
-          Static P pin d'entrée
-          static int tensionmemo memorisation de la premiere tension mesurée en calibration
-          int CoeffTension = CoeffTensionDefaut 7000 par défaut
-      */
-      Sbidon = smsstruct.message.substring(12, 16); // texte apres =
-      //Serial.print(F("Sbidon=")),Serial.print(Sbidon),Serial.print(char(44)),Serial.println(Sbidon.length());
-      long tension = 0;
-      if (Sbidon.substring(0, 1) == "." && Sbidon.length() > 1) { // debut mode cal
-        if (Sbidon.substring(1, 2) == "1" ) {
-          M = 1;
-          P = PinBattSol;
-          coef = CoeffTension[0];
-        }
-        if (Sbidon.substring(1, 2) == "2" ) {
-          M = 2;
-          P = PinBattProc;
-          coef = CoeffTension[1];
-        }
-        if (Sbidon.substring(1, 2) == "3" ) {
-          M = 3;
-          P = PinBattUSB;
-          coef = CoeffTension[2];
-        }
-        if (Sbidon.substring(1, 2) == "4" ) {
-          if(!Allume)digitalWrite(PinConvert, HIGH); // Alimentation du convertisseur 12/24V
-          for (int i = 0; i < 5 ; i++) {
-            read_adc(PinBattSol, PinBattProc, PinBattUSB, Pin24V, PinLum); // lecture des adc
-            Alarm.delay(100);
-          }
-          M = 4;
-          P = Pin24V;
-          coef = CoeffTension[3];
-        }
-        Serial.print("mode = "), Serial.print(M), Serial.println(Sbidon.substring(1, 2));
-        FlagCalibration = true;
-
-        coef = CoeffTensionDefaut;
-        tension = map(adc_mm[M-1] / nSample, 0, 4095, 0, coef);
-        // tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
-        // Serial.print("TensionBatterie = "),Serial.println(TensionBatterie);
-        tensionmemo = tension;
-      }
-      else if (FlagCalibration && Sbidon.substring(0, 4).toInt() > 0 && Sbidon.substring(0, 4).toInt() <= 8000) {
-        // si Calibration en cours et valeur entre 0 et 5000
-        Serial.println(Sbidon.substring(0, 4));
-        /* calcul nouveau coeff */
-        coef = Sbidon.substring(0, 4).toFloat() / float(tensionmemo) * CoeffTensionDefaut;
-        // Serial.print("Coeff Tension = "),Serial.println(coef);
-        tension = map(adc_mm[M-1] / nSample, 0, 4095, 0, coef);
-        // tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
-        CoeffTension[M - 1] = coef;
-        FlagCalibration = false;
-        Recordcalib();														// sauvegarde en SPIFFS
-
-        if (M == 4 && !Allume) {
-          digitalWrite(PinConvert, LOW); // Arret du convertisseur 12/24V
-        }
-      }
-      else {
-        message += F("message non reconnu");
-        message += fl;
-        FlagCalibration = false;
-      }
-      message += F("Mode Calib Tension ");
-      message += String(M) + fl;
-      message += F("TensionMesuree = ");
-      message += tension;
-      message += fl;
-      message += F("Coeff Tension = ");
-      message += coef;
-      if (M == 1) {
-        message += fl;
-        message += F("Batterie = ");
-        if(config.TypeBatt == 16) message += String(BattPBpct(tension, 6));
-        if(config.TypeBatt == 24) message += String(BattLiFePopct(tension, 4));
-        message += "%";
-      }
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(Id.substring(5, 9)) == 1) { // cherche CVXX
-      if (smsstruct.message.indexOf("D") == 0) {
-        Extinction(); // Violet 0, Blanc 0
-        MajLog(nomAppelant, "DCV");
-      }
-      else if (smsstruct.message.indexOf("F") == 0) {
-        if(Feux < 5 || Feux == 7){ // si Carré fermé ne rien faire
-          EffaceAlaCdeFBlc();
-          Feux = 1;
-          Allumage(); // Violet 1, Blanc 0
-          MajLog(nomAppelant, "FCV");
-        }
-      }
-      else if(smsstruct.message.indexOf("O") == 0 || smsstruct.message.indexOf("M") == 0 || smsstruct.message.indexOf("S") == 0 || smsstruct.message.indexOf("V") == 0){
-        if(FlagTqt_1){ // taquet ouvert
-          if (smsstruct.message.indexOf("O") == 0) {
-            EffaceAlaCdeFBlc();
-            Feux = 2;
-            Allumage(); // Violet 0, Blanc 1
-            MajLog(nomAppelant, "OCV");
-            if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
-          }
-          else if (smsstruct.message.indexOf("M") == 0) {
-            EffaceAlaCdeFBlc();
-            Feux = 3;
-            Allumage(); // Violet 0, Blanc Manoeuvre Cli lent
-            MajLog(nomAppelant, "MCV");
-            // if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
-          }
-          else if (smsstruct.message.indexOf("S") == 0) {
-            EffaceAlaCdeFBlc();
-            Feux = 4;
-            Allumage(); // Violet 0, Blanc Secteur Cli rapide
-            MajLog(nomAppelant, "SCV");
-            if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
-          }
-          else if (smsstruct.message.indexOf("V") == 0) {
-            EffaceAlaCdeFBlc();
-            Feux = 7;
-            Allumage(); // Violet Cli, Blanc 0
-            MajLog(nomAppelant, "VCV");
-            if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
-          }
-        } else { // taquet fermé
-          FlagDemande_Feux = true;
-          Memo_Demande_Feux[0] = nomAppelant;      // nom demandeur
-          Memo_Demande_Feux[1] = smsstruct.sendernumber;   // num demandeur
-          Memo_Demande_Feux[2] = smsstruct.message; // demande d'origine
-          Feux = 5; // Violet 1, Blanc 0
-          MajLog(nomAppelant, "CCV demande : " + smsstruct.message);
-          // Serial.println("memo demande feux :");
-          // Serial.println(Memo_Demande_Feux[0]);
-          // Serial.println(Memo_Demande_Feux[1]);
-          // Serial.println(Memo_Demande_Feux[2]);
-        }
-      }
-      else {
-        // message += "non reconnu" + fl;
-      }
-      generationMessage();
-      if (Feux != 0) { // seulement si different de DCV, doublon DCV envoie automatiquement une reponse dans Extinction()
-        envoieGroupeSMS(3, 0); // envoie serveur
-      }
-      // evite de repondre 2 fois au serveur
-      if (!smsserveur)sendSMSReply(smsstruct.sendernumber, slot); // reponse si pas serveur
-    }
-    else if (smsstruct.message.indexOf(F("FBLCPWM")) == 0) {
-      if (smsstruct.message.substring(7, 8) == "=") {
-        int i = smsstruct.message.substring(8, smsstruct.message.length()).toInt();
-        if (i > 4 && i < 101) {
-          config.FBlcPWM = i;
-          sauvConfig();
-        }
-      }
-      // Allumage();
-      message += "Blanc PWM =";
-      message += config.FBlcPWM;
-      message += "%";
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("FVLTPWM")) == 0) {
-      if (smsstruct.message.substring(7, 8) == "=") {
-        int i = smsstruct.message.substring(8, smsstruct.message.length()).toInt();
-        if (i > 4 && i < 101) {
-          config.FVltPWM = i;
-          sauvConfig();
-        }
-      }
-      // Allumage();
-      message += "Violet PWM =";
-      message += config.FVltPWM;
-      message += "%";
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("SLOWBLINKER")) == 0) {
-      if (smsstruct.message.substring(11, 12) == "=") {
-        int i = smsstruct.message.substring(12, smsstruct.message.length()).toInt();
-        if (i > 199 && i < 2001) {
-          config.SlowBlinker = i;
-          sauvConfig();
-        }
-      }
-      // Allumage();
-      message += "SlowBlinker =";
-      message += config.SlowBlinker;
-      message += "ms";
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("FASTBLINKER")) == 0) {
-      if (smsstruct.message.substring(11, 12) == "=") {
-        int i = smsstruct.message.substring(12, smsstruct.message.length()).toInt();
-        if (i > 149 && i < 2001) {
-          config.FastBlinker = i;
-          sauvConfig();
-        }
-      }
-      // Allumage();
-      message += "FastBlinker =";
-      message += config.FastBlinker;
-      message += "ms";
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("FASTRATER")) == 0) {
-      if (smsstruct.message.substring(9, 10) == "=") {
-        int i = smsstruct.message.substring(10, smsstruct.message.length()).toInt();
-        if (i > 999 && i < 3001) {
-          config.FastRater = i;
-          sauvConfig();
-        }
-      }
-      // Allumage();
-      message += "FastRater =";
-      message += config.FastRater;
-      message += "ms";
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("PARAM")) >= 0) {
-      //message param divisé en 2 trop long depasse long 1sms 160c
-      bool erreur = false;
-      // Serial.print("position X:"),Serial.println(smsstruct.message.substring(7, 8));
-      if(smsstruct.message.substring(7, 8) == "1"){ // PARAM1
-      // Serial.print("position ::"),Serial.println(smsstruct.message.substring(9, 10));
-        if (smsstruct.message.substring(9, 10) == ":") {
-          // json en reception sans lumlut
-          DynamicJsonDocument doc(200);
-          DeserializationError err = deserializeJson(doc, smsstruct.message);
-          if(err){
-            erreur = true;
-          }
-          else{
-            // Serial.print(F("Deserialization succeeded"));
-            JsonObject param = doc["PARAM1"];
-            config.SlowBlinker = param["SLOWBLINKER"];
-            config.FastBlinker = param["FASTBLINKER"];
-            config.FastRater = param["FASTRATER"];
-            config.DebutJour = Hhmmtohdec(param["DEBUT"]);
-            config.FinJour = Hhmmtohdec(param["FIN"]);
-            sauvConfig();
-            Alarm.disable(FinJour);
-            Alarm.write(FinJour,config.FinJour);
-            // FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
-            Alarm.enable(FinJour);
-            Alarm.disable(DebutJour);
-            Alarm.write(DebutJour,config.DebutJour);
-            // FinJour = Alarm.alarmRepeat(config.DebutJour, SignalVie);// init tempo
-            Alarm.enable(DebutJour);
-          }
-        }
-        else{
-          erreur = true;
-        }
-      }
-      else if(smsstruct.message.substring(7, 8) == "2"){ // PARAM2
-        if (smsstruct.message.substring(9, 10) == ":") {
-          // json en reception sans lumlut
-          DynamicJsonDocument doc(200);
-          DeserializationError err = deserializeJson(doc, smsstruct.message);
-          if(err){
-            erreur = true;
-          }
-          else{
-            // Serial.print(F("Deserialization succeeded"));
-            JsonObject param  = doc["PARAM2"];
-            config.LumAuto    = param["LUMAUTO"];
-            config.FBlcPWM    = param["FBLCPWM"];
-            config.FVltPWM    = param["FVLTPWM"];
-            config.AutoF      = param["AUTOF"];
-            config.TempoAutoF = param["TEMPOAUTOF"];
-            sauvConfig();
-          }
-        }
-      }
-      if(!erreur){
-        // ne fonctionne pas
-        // const size_t capacity = JSON_ARRAY_SIZE(11) + JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(11);
-        // calculer taille https://arduinojson.org/v6/assistant/
-        DynamicJsonDocument doc(500);
-        JsonObject param = doc.createNestedObject("param");
-        param["slowblinker"] = config.SlowBlinker;
-        param["fastblinker"] = config.FastBlinker;
-        param["fastrater"] = config.FastRater;
-        param["debut"] = Hdectohhmm(config.DebutJour);
-        param["fin"] = Hdectohhmm(config.FinJour);
-        param["autof"] = config.AutoF;
-        param["tempoautof"] = config.TempoAutoF;
-        param["fblcpwm"] = config.FBlcPWM;
-        param["fvltpwm"] = config.FVltPWM;
-        param["lumauto"] = config.LumAuto;
-
-        JsonArray param_lumlut = param.createNestedArray("lumlut");
-        for (int i = 0; i < 11; i++) {
-          param_lumlut.add(TableLum[i][1]);
-        }
-        String jsonbidon;
-        serializeJson(doc, jsonbidon);
-        // serializeJson(doc, Serial);
-        message += jsonbidon;
       }
       else{
-        message += "erreur json";
+        erreur = true;
       }
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
     }
-    else if (smsstruct.message.indexOf(F("E1ACTIVE")) == 0) {
-      bool valid = false;
-      if (smsstruct.message.substring(8, 9) == "=") {
-        if (smsstruct.message.substring(9, 10) == "1") {
-          if (!config.Ip1) {
-            config.Ip1 = true;
-            FlagTqt_1 = false;
-            sauvConfig();
-            valid = true;
-            MajLog(nomAppelant, smsstruct.message);
-          }
+    else if(Rmessage.substring(7, 8) == "2"){ // PARAM2
+      if (Rmessage.substring(9, 10) == ":") {
+        // json en reception sans lumlut
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, Rmessage);
+        if(err){
+          erreur = true;
         }
-        else if (smsstruct.message.substring(9, 10) == "0") {
-          if (config.Ip1) {
-            config.Ip1 = false;
-            FlagTqt_1 = true;
-            sauvConfig();
-            valid = true;
-            MajLog(nomAppelant, smsstruct.message);
-          }
-        }
-        if (valid) {
-          sauvConfig();															// sauvegarde config
+        else{
+          // Serial.print(F("Deserialization succeeded"));
+          JsonObject param  = doc["PARAM2"];
+          config.LumAuto    = param["LUMAUTO"];
+          config.FBlcPWM    = param["FBLCPWM"];
+          config.FVltPWM    = param["FVLTPWM"];
+          config.AutoF      = param["AUTOF"];
+          config.TempoAutoF = param["TEMPOAUTOF"];
+          sauvConfig();
         }
       }
-      message += "Entree 1 ";
-      if (config.Ip1) {
-        message += "Active";
-      }
-      else {
-        message += "InActive";
-      }
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
     }
-    else if (smsstruct.message.indexOf(F("E2ACTIVE")) == 0) {
-      bool valid = false;
-      if (smsstruct.message.substring(8, 9) == "=") {
-        if (smsstruct.message.substring(9, 10) == "1") {
-          if (!config.Ip2) {
-            config.Ip2 = true;
-            sauvConfig();
-            valid = true;
-          }
-        }
-        else if (smsstruct.message.substring(9, 10) == "0") {
-          if (config.Ip2) {
-            config.Ip2 = false;
-            sauvConfig();
-            valid = true;
-          }
-        }
-        if (valid) {
-          sauvConfig();															// sauvegarde config
+    if(!erreur){
+      // ne fonctionne pas
+      // const size_t capacity = JSON_ARRAY_SIZE(11) + JSON_OBJECT_SIZE(1) + JSON_OBJECT_SIZE(11);
+      // calculer taille https://arduinojson.org/v6/assistant/
+      JsonDocument doc;
+      JsonObject param = doc["param"].to<JsonObject>();
+      param["slowblinker"] = config.SlowBlinker;
+      param["fastblinker"] = config.FastBlinker;
+      param["fastrater"] = config.FastRater;
+      param["debut"] = Hdectohhmm(config.DebutJour);
+      param["fin"] = Hdectohhmm(config.FinJour);
+      param["autof"] = config.AutoF;
+      param["tempoautof"] = config.TempoAutoF;
+      param["fblcpwm"] = config.FBlcPWM;
+      param["fvltpwm"] = config.FVltPWM;
+      param["lumauto"] = config.LumAuto;
+
+      JsonArray param_lumlut = doc["lumlut"].to<JsonArray>();
+      for (int i = 0; i < 11; i++) {
+        param_lumlut.add(TableLum[i][1]);
+      }
+      String jsonbidon;
+      serializeJson(doc, jsonbidon);
+      // serializeJson(doc, Serial);
+      message += jsonbidon;
+    }
+    else{
+      message += "erreur json";
+    }
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("E1ACTIVE")) == 0) {
+    bool valid = false;
+    if (Rmessage.substring(8, 9) == "=") {
+      if (Rmessage.substring(9, 10) == "1") {
+        if (!config.Ip1) {
+          config.Ip1 = true;
+          FlagTqt_1 = false;
+          sauvConfig();
+          valid = true;
+          MajLog(Origine, Rmessage);
         }
       }
-      message += "Entree 2 ";
-      if (config.Ip2) {
+      else if (Rmessage.substring(9, 10) == "0") {
+        if (config.Ip1) {
+          config.Ip1 = false;
+          FlagTqt_1 = true;
+          sauvConfig();
+          valid = true;
+          MajLog(Origine, Rmessage);
+        }
+      }
+      if (valid) {
+        sauvConfig();															// sauvegarde config
+      }
+    }
+    message += "Entree 1 ";
+    if (config.Ip1) {
       message += "Active";
+    }
+    else {
+      message += "InActive";
+    }
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("E2ACTIVE")) == 0) {
+    bool valid = false;
+    if (Rmessage.substring(8, 9) == "=") {
+      if (Rmessage.substring(9, 10) == "1") {
+        if (!config.Ip2) {
+          config.Ip2 = true;
+          sauvConfig();
+          valid = true;
+        }
+      }
+      else if (Rmessage.substring(9, 10) == "0") {
+        if (config.Ip2) {
+          config.Ip2 = false;
+          sauvConfig();
+          valid = true;
+        }
+      }
+      if (valid) {
+        sauvConfig();															// sauvegarde config
+      }
+    }
+    message += "Entree 2 ";
+    if (config.Ip2) {
+    message += "Active";
+    }
+    else {
+    message += "InActive";
+    }
+    message += fl;
+    sendReply(Origine);
+  }
+  else if (gsm && Rmessage.indexOf(F("UPLOADLOG")) == 0) {//upload log sur demande
+    message += F("lancement upload log");
+    message += fl;
+    MajLog(Origine, "upload log");// renseigne log
+    Serial.println(F("Starting..."));
+    byte reply = FTP_upload_function(filelog); // Upload fichier
+    Serial.println("The end... Response: " + String(reply));
+
+    if(reply == true){
+      message += F("upload OK");
+      SPIFFS.remove(filelog);  // efface fichier log
+      MajLog(Origine, "");         // nouveau log
+      MajLog(Origine, F("upload OK"));// renseigne nouveau log
+    } else {
+      message += F("upload fail");
+      MajLog(Origine, F("upload fail"));// renseigne log
+    }
+    sendReply(Origine);
+  }
+  else if (gsm && Rmessage.indexOf(F("COEFF")) == 0) {//Lecture/ecriture des coeff
+    // COEFF=xxxx,xxxx,xxxx,xxxx
+    if(Rmessage.indexOf(char(61)) == 5){ // =
+      Sbidon = Rmessage.substring(6, Rmessage.length());
+      Serial.println(Sbidon);
+      int tempo[4] = {0,0,0,0};
+      byte p1 = 0;
+      byte p2 = 0;
+      bool flag = true;
+      for(int i = 0; i < 4; i++){          
+        // printf("i=%d,p1=%d,p2=%d\n",i,p1,p2);
+        p2 = Sbidon.indexOf(char(44), p1 + 1); // ,
+        tempo[i] = Sbidon.substring(p1,p2).toInt();
+        if(tempo[i] < 0) flag = false;
+        if(i!=3 && p2 == 255) flag = false;
+        p1 = p2 + 1;          
+        // printf("i=%d,p1=%d,p2=%d\n",i,p1,p2);
+      }
+      if (flag){ // format OK
+        for(int i = 0; i < 4; i++){
+          CoeffTension[i] = tempo[i];
+        }
+        Recordcalib(); // enregistre en SPIFFS
+      }
+    }
+    message += "Coeff calibration:" + fl;
+    for(int i = 0; i < 4; i++){
+      message += String(CoeffTension[i]);
+      if(i < 3 ) message += ",";
+    }
+    Serial.println(message);
+    sendReply(Origine);
+  }
+  else if (gsm && Rmessage.indexOf(F("UPLOADCOEFF")) == 0) {//upload des coeff
+    message += F("lancement upload Coeff");
+    message += fl;
+    MajLog(Origine, "upload coeff");// renseigne log
+    Serial.println(F("Starting..."));
+    byte reply = FTP_upload_function(filecalibration); // Upload fichier
+    Serial.println("The end... Response: " + String(reply));
+
+    if(reply == true){
+      message += F("upload OK");
+      MajLog(Origine, F("upload Coeff OK"));// renseigne nouveau log
+    } else {
+      message += F("upload fail");
+      MajLog(Origine, F("upload Coeff fail"));// renseigne log
+    }
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf("FTPDATA") > -1) {
+  // Parametres FTPDATA=Serveur:User:Pass:port
+  // {"FTPDATA":{"serveur":"dd.org","user":"user","pass":"pass","port":00}}
+  bool erreur = false;
+  bool formatsms = false;
+  if (Rmessage.indexOf(":") == 10) { // format json
+    JsonDocument doc; //https://arduinojson.org/v6/assistant/
+    DeserializationError err = deserializeJson(doc, Rmessage);
+    if (err) {
+      erreur = true;
+    }
+    else {
+      JsonObject ftpdata = doc["FTPDATA"];
+      strncpy(config.ftpServeur,  ftpdata["serveur"], 26);
+      strncpy(config.ftpUser,     ftpdata["user"],    9);
+      strncpy(config.ftpPass,     ftpdata["pass"],    16);
+      config.ftpPort         =    ftpdata["port"];
+      sauvConfig();													// sauvegarde config
+    }
+  }
+  else if ((Rmessage.indexOf(char(61))) == 7) { // format sms
+    formatsms = true;
+    byte w = Rmessage.indexOf(":");
+    byte x = Rmessage.indexOf(":", w + 1);
+    byte y = Rmessage.indexOf(":", x + 1);
+    byte zz = Rmessage.length();
+    if (Rmessage.substring(y + 1, zz).toInt() > 0) { // Port > 0
+      if ((w - 7) < 25 && (x - w - 1) < 11 && (y - x - 1) < 16) {
+        Sbidon = Rmessage.substring(7, w);
+        Sbidon.toCharArray(config.ftpServeur, (Sbidon.length() + 1));
+        Sbidon = Rmessage.substring(w + 1, x);
+        Sbidon.toCharArray(config.ftpUser, (Sbidon.length() + 1));
+        Sbidon = Rmessage.substring(x + 1, y);
+        Sbidon.toCharArray(config.ftpPass, (Sbidon.length() + 1));
+        config.ftpPort = Rmessage.substring(y + 1, zz).toInt();
+        sauvConfig();													// sauvegarde config
       }
       else {
-      message += "InActive";
+        erreur = true;
       }
-      message += fl;
-      sendSMSReply(smsstruct.sendernumber, slot);
+    } else {
+      erreur = true;
     }
-    else if (gsm && smsstruct.message.indexOf(F("UPLOADLOG")) == 0) {//upload log sur demande
-      message += F("lancement upload log");
+  }
+  if (!erreur) {
+    if (formatsms) {
+      message += "Sera pris en compte au prochain demarrage\nOu envoyer RST maintenant";
       message += fl;
-      MajLog(nomAppelant, "upload log");// renseigne log
-      Serial.println(F("Starting..."));
-      byte reply = FTP_upload_function(filelog); // Upload fichier
-      Serial.println("The end... Response: " + String(reply));
+      message += F("Parametres FTP :");
+      message += fl;
+      message += "Serveur:" + String(config.ftpServeur) + fl;
+      message += "User:"    + String(config.ftpUser) + fl;
+      message += "Pass:"    + String(config.ftpPass) + fl;
+      message += "Port:"    + String(config.ftpPort) + fl;
+    }
+    else {
+      JsonDocument doc;
+      JsonObject FTPDATA = doc["FTPDATA"].to<JsonObject>();
+      FTPDATA["serveur"] = config.ftpServeur;
+      FTPDATA["user"]    = config.ftpUser;
+      FTPDATA["pass"]    = config.ftpPass;
+      FTPDATA["port"]    = config.ftpPort;
+      Sbidon = "";
+      serializeJson(doc, Sbidon);
+      message += Sbidon;
+      message += fl;
+    }
+  }
+  else {
+    message += "Erreur format";
+    message += fl;
+  }
+  sendReply(Origine);
+}
+  else if (Rmessage.indexOf("FTPSERVEUR") == 0) { // Serveur FTP
+    // case sensitive
+    // FTPSERVEUR=xyz.org
+    if (Rmessage.indexOf(char(61)) == 10) {
+      Sbidon = Rmessage.substring(11);
+      Serial.print("ftpserveur:"),Serial.print(Sbidon);
+      Serial.print(" ,"), Serial.println(Sbidon.length());
+      Sbidon.toCharArray(config.ftpServeur, (Sbidon.length() + 1));
+      sauvConfig();
+    }
+    message += F("FTPserveur =");
+    message += String(config.ftpServeur);
+    message += F("\n au prochain demarrage");
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf("MQTTDATA") > -1) {
+    // Parametres MQTTDATA=serveur:user:pass:port:permanent_topic:send_topic:receive_topic
+    // {"MQTTDATA":{"serveur":"xxxx.org","user":"uuu","pass":"passpass","port":9999,"permanent_topic":"CV65/permanent","send_topic":"Signalisation/input","receive_topic":"CV65/output"}}
 
-      if(reply == true){
-        message += F("upload OK");
-        SPIFFS.remove(filelog);  // efface fichier log
-        MajLog(nomAppelant, "");         // nouveau log
-        MajLog(nomAppelant, F("upload OK"));// renseigne nouveau log
-      } else {
-        message += F("upload fail");
-        MajLog(nomAppelant, F("upload fail"));// renseigne log
-      }
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (gsm && smsstruct.message.indexOf(F("COEFF")) == 0) {//Lecture/ecriture des coeff
-      // COEFF=xxxx,xxxx,xxxx,xxxx
-      if(smsstruct.message.indexOf(char(61)) == 5){ // =
-        Sbidon = smsstruct.message.substring(6, smsstruct.message.length());
-        Serial.println(Sbidon);
-        int tempo[4] = {0,0,0,0};
-        byte p1 = 0;
-        byte p2 = 0;
-        bool flag = true;
-        for(int i = 0; i < 4; i++){          
-          // printf("i=%d,p1=%d,p2=%d\n",i,p1,p2);
-          p2 = Sbidon.indexOf(char(44), p1 + 1); // ,
-          tempo[i] = Sbidon.substring(p1,p2).toInt();
-          if(tempo[i] < 0) flag = false;
-          if(i!=3 && p2 == 255) flag = false;
-          p1 = p2 + 1;          
-          // printf("i=%d,p1=%d,p2=%d\n",i,p1,p2);
-        }
-        if (flag){ // format OK
-          for(int i = 0; i < 4; i++){
-            CoeffTension[i] = tempo[i];
-          }
-          Recordcalib(); // enregistre en SPIFFS
-        }
-      }
-      message += "Coeff calibration:" + fl;
-      for(int i = 0; i < 4; i++){
-        message += String(CoeffTension[i]);
-        if(i < 3 ) message += ",";
-      }
-      Serial.println(message);
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (gsm && smsstruct.message.indexOf(F("UPLOADCOEFF")) == 0) {//upload des coeff
-      message += F("lancement upload Coeff");
-      message += fl;
-      MajLog(nomAppelant, "upload coeff");// renseigne log
-      Serial.println(F("Starting..."));
-      byte reply = FTP_upload_function(filecalibration); // Upload fichier
-      Serial.println("The end... Response: " + String(reply));
-
-      if(reply == true){
-        message += F("upload OK");
-        MajLog(nomAppelant, F("upload Coeff OK"));// renseigne nouveau log
-      } else {
-        message += F("upload fail");
-        MajLog(nomAppelant, F("upload Coeff fail"));// renseigne log
-      }
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf("FTPDATA") > -1) {
-    // Parametres FTPDATA=Serveur:User:Pass:port
-    // {"FTPDATA":{"serveur":"dd.org","user":"user","pass":"pass","port":00}}
     bool erreur = false;
-    bool formatsms = false;
-    if (smsstruct.message.indexOf(":") == 10) { // format json
-      DynamicJsonDocument doc(210); //https://arduinojson.org/v6/assistant/
-      DeserializationError err = deserializeJson(doc, smsstruct.message);
+    // bool formatsms = false;
+    if (Rmessage.indexOf(":") == 11) { // format json
+      JsonDocument doc; //https://arduinojson.org/v6/assistant/
+      DeserializationError err = deserializeJson(doc, Rmessage);
       if (err) {
         erreur = true;
       }
       else {
-        JsonObject ftpdata = doc["FTPDATA"];
-        strncpy(config.ftpServeur,  ftpdata["serveur"], 26);
-        strncpy(config.ftpUser,     ftpdata["user"],    9);
-        strncpy(config.ftpPass,     ftpdata["pass"],    16);
-        config.ftpPort         =    ftpdata["port"];
+        JsonObject mqttdata = doc["MQTTDATA"];
+        strncpy(config.mqttServer,     mqttdata["serveur"],         26);
+        strncpy(config.mqttUserName,   mqttdata["user"],            11);
+        strncpy(config.mqttPass,       mqttdata["pass"],            16);
+        config.mqttPort            =   mqttdata["port"];
+        strncpy(config.sendTopic,      mqttdata["send_topic"],      20);
+        strncpy(config.receiveTopic,   mqttdata["receive_topic"],   17);
+        sauvConfig();
+      }
+    }
+    
+    if (!erreur) {
+      JsonDocument doc;
+      JsonObject MQTTDATA = doc["MQTTDATA"].to<JsonObject>();
+      MQTTDATA["serveur"] = config.mqttServer;
+      MQTTDATA["user"]    = config.mqttUserName;
+      MQTTDATA["pass"]    = config.mqttPass;
+      MQTTDATA["port"]    = config.mqttPort;
+      MQTTDATA["send_topic"]   = config.sendTopic;
+      MQTTDATA["receive_topic"]   = config.receiveTopic;
+      
+      Sbidon = "";
+      serializeJson(doc, Sbidon);
+      message += Sbidon;
+      message += fl;
+    }
+    else {
+      message += "Erreur format";
+      message += fl;
+    }
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf("MQTTSERVEUR") == 0) { // Serveur MQTT
+    // case sensitive
+    // MQTTSERVEUR=abcd.org
+    if (Rmessage.indexOf(char(61)) == 11) {
+      Sbidon = Rmessage.substring(12);
+      Serial.print("mqttserveur:"),Serial.print(Sbidon);
+      Serial.print(" ,"), Serial.println(Sbidon.length());
+      Sbidon.toCharArray(config.mqttServer, (Sbidon.length() + 1));
+      sauvConfig();
+    }
+    message += F("MQTTserveur =");
+    message += String(config.mqttServer);
+    message += F("\n au prochain demarrage");
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("GPRSDATA")) > -1) {
+    // Parametres GPRSDATA = "APN":"user":"pass"
+    // GPRSDATA="sl2sfr":"":""
+    // {"GPRSDATA":{"apn":"sl2sfr","user":"","pass":""}}
+    bool erreur = false;
+    bool formatsms = false;
+    if (Rmessage.indexOf(":") == 11) { // format json
+      JsonDocument doc;
+      DeserializationError err = deserializeJson(doc, Rmessage);
+      if (err) {
+        erreur = true;
+      }
+      else {
+        JsonObject gprsdata = doc["GPRSDATA"];
+        strncpy(config.apn, gprsdata["apn"], 11);
+        strncpy(config.gprsUser, gprsdata["user"], 11);
+        strncpy(config.gprsPass, gprsdata["pass"], 11);
+        // Serial.print("apn length:"),Serial.println(strlen(gprsdata["apn"]));
+        // Serial.print("apn:"),Serial.println(config.apn);
+        // Serial.print("user:"),Serial.println(config.gprsUser);
+        // Serial.print("pass:"),Serial.println(config.gprsPass);
         sauvConfig();													// sauvegarde config
       }
     }
-    else if ((smsstruct.message.indexOf(char(61))) == 7) { // format sms
+    else if ((Rmessage.indexOf(char(61))) == 8) { // format sms
       formatsms = true;
-      byte w = smsstruct.message.indexOf(":");
-      byte x = smsstruct.message.indexOf(":", w + 1);
-      byte y = smsstruct.message.indexOf(":", x + 1);
-      byte zz = smsstruct.message.length();
-      if (smsstruct.message.substring(y + 1, zz).toInt() > 0) { // Port > 0
-        if ((w - 7) < 25 && (x - w - 1) < 11 && (y - x - 1) < 16) {
-          Sbidon = smsstruct.message.substring(7, w);
-          Sbidon.toCharArray(config.ftpServeur, (Sbidon.length() + 1));
-          Sbidon = smsstruct.message.substring(w + 1, x);
-          Sbidon.toCharArray(config.ftpUser, (Sbidon.length() + 1));
-          Sbidon = smsstruct.message.substring(x + 1, y);
-          Sbidon.toCharArray(config.ftpPass, (Sbidon.length() + 1));
-          config.ftpPort = smsstruct.message.substring(y + 1, zz).toInt();
+      byte cpt = 0;
+      byte i = 9;
+      do { // compte nombre de " doit etre =6
+        i = Rmessage.indexOf('"', i + 1);
+        cpt ++;
+      } while (i <= Rmessage.length());
+      Serial.print("nombre de \" :"), Serial.println(cpt);
+      if (cpt == 6) {
+        byte x = Rmessage.indexOf(':');
+        byte y = Rmessage.indexOf(':', x + 1);
+        byte z = Rmessage.lastIndexOf('"');
+        // Serial.printf("%d:%d:%d\n",x,y,z);
+        // Serial.printf("%d:%d:%d\n", x -1 - 10, y-1 - x-1-1, z - y-1-1);
+        if ((x - 11) < 11 && (y - x - 3) < 11 && (z - y - 2) < 11) { // verification longueur des variables
+          Sbidon = Rmessage.substring(10, x - 1);
+          Sbidon.toCharArray(config.apn, (Sbidon.length() + 1));
+          Sbidon = Rmessage.substring(x + 1 + 1 , y - 1);
+          Sbidon.toCharArray(config.gprsUser, (Sbidon.length() + 1));
+          Sbidon = Rmessage.substring(y + 1 + 1, z);
+          Sbidon.toCharArray(config.gprsPass, (Sbidon.length() + 1));
+
+          // Serial.print("apn:"),Serial.println(config.apn);
+          // Serial.print("user:"),Serial.println(config.gprsUser);
+          // Serial.print("pass:"),Serial.println(config.gprsPass);
+
           sauvConfig();													// sauvegarde config
         }
         else {
           erreur = true;
         }
-      } else {
+      }
+      else {
         erreur = true;
       }
     }
     if (!erreur) {
       if (formatsms) {
-        message += "Sera pris en compte au prochain demarrage\nOu envoyer RST maintenant";
-        message += fl;
-        message += F("Parametres FTP :");
-        message += fl;
-        message += "Serveur:" + String(config.ftpServeur) + fl;
-        message += "User:"    + String(config.ftpUser) + fl;
-        message += "Pass:"    + String(config.ftpPass) + fl;
-        message += "Port:"    + String(config.ftpPort) + fl;
+        message += "Sera pris en compte au prochain demarrage\nOu envoyer RST maintenant" + fl;
+        message += "Parametres GPRS \"apn\":\"user\":\"pass\"";
+        message += fl + "\"";
+        message += String(config.apn);
+        message += "\":\"";
+        message += String(config.gprsUser);
+        message += "\":\"";
+        message += String(config.gprsPass);
+        message += "\"" + fl;
       }
       else {
-        DynamicJsonDocument doc(210);
-        JsonObject FTPDATA = doc.createNestedObject("FTPDATA");
-        FTPDATA["serveur"] = config.ftpServeur;
-        FTPDATA["user"]    = config.ftpUser;
-        FTPDATA["pass"]    = config.ftpPass;
-        FTPDATA["port"]    = config.ftpPort;
+        JsonDocument doc;
+        JsonObject gprsdata = doc["GPRSDATA"].to<JsonObject>();
+        gprsdata["apn"]  = config.apn;
+        gprsdata["user"] = config.gprsUser;
+        gprsdata["pass"] = config.gprsPass;
         Sbidon = "";
         serializeJson(doc, Sbidon);
         message += Sbidon;
@@ -2315,302 +2442,126 @@ fin_tel:
       message += "Erreur format";
       message += fl;
     }
-    sendSMSReply(smsstruct.sendernumber, slot);
+    sendReply(Origine);
   }
-    else if (smsstruct.message.indexOf("FTPSERVEUR") == 0) { // Serveur FTP
-      // case sensitive
-      // FTPSERVEUR=xyz.org
-      if (smsstruct.message.indexOf(char(61)) == 10) {
-        Sbidon = smsstruct.message.substring(11);
-        Serial.print("ftpserveur:"),Serial.print(Sbidon);
-        Serial.print(" ,"), Serial.println(Sbidon.length());
-        Sbidon.toCharArray(config.ftpServeur, (Sbidon.length() + 1));
+  else if (Rmessage == "RSTALACDEFBLC") {
+    // demande reset Alarme Cde Feu Blanc
+    EffaceAlaCdeFBlc();
+    message += "Reset Alarme en cours";
+    sendReply(Origine);
+  }
+  else if (Rmessage == "VIDELOG"){
+    SPIFFS.remove(filelog);
+    FileLogOnce = false;
+    message += "Effacement fichier log";
+    sendReply(Origine);
+  }
+  else if (Rmessage == "AUTOUPLOAD"){ // Auto upload log vers serveur FTP
+    if (Rmessage.indexOf(char(61)) == 10) {
+      byte c = Rmessage.substring(11).toInt();
+      if(c==0 || c==1){
+        config.autoupload = c;
         sauvConfig();
       }
-      message += F("FTPserveur =");
-      message += String(config.ftpServeur);
-      message += F("\n au prochain demarrage");
-      sendSMSReply(smsstruct.sendernumber, slot);
+      message += "Autoupload:";
+      message += String(config.autoupload);
+      sendReply(Origine);
     }
-    else if (smsstruct.message.indexOf("MQTTDATA") > -1) {
-      // Parametres MQTTDATA=serveur:user:pass:port:permanent_topic:send_topic:receive_topic
-      // {"MQTTDATA":{"serveur":"xxxx.org","user":"uuu","pass":"passpass","port":9999,"permanent_topic":"CV65/permanent","send_topic":"Signalisation/input","receive_topic":"CV65/output"}}
-
-      bool erreur = false;
-      // bool formatsms = false;
-      if (smsstruct.message.indexOf(":") == 11) { // format json
-        DynamicJsonDocument doc(384); //https://arduinojson.org/v6/assistant/
-        DeserializationError err = deserializeJson(doc, smsstruct.message);
-        if (err) {
-          erreur = true;
-        }
-        else {
-          JsonObject mqttdata = doc["MQTTDATA"];
-          strncpy(config.mqttServer,     mqttdata["serveur"],         26);
-          strncpy(config.mqttUserName,   mqttdata["user"],            11);
-          strncpy(config.mqttPass,       mqttdata["pass"],            16);
-          config.mqttPort            =   mqttdata["port"];
-          strncpy(config.permanentTopic, mqttdata["permanent_topic"], 20);
-          strncpy(config.sendTopic,      mqttdata["send_topic"],      20);
-          strncpy(config.receiveTopic,   mqttdata["receive_topic"],   17);
+  }
+  else if (Rmessage.indexOf(F("CPTALATRCK")) == 0 || Rmessage.indexOf(F("CPTALA")) == 0) { // Compteur Ala avant Flag
+      if (Rmessage.indexOf(char(61)) == 10) {
+        int c = Rmessage.substring(11).toInt();
+        if (c > 1 && c < 501) {
+          config.cptAla = c;
           sauvConfig();
         }
       }
-      
-      if (!erreur) {
-        DynamicJsonDocument doc(384);
-        JsonObject MQTTDATA = doc.createNestedObject("MQTTDATA");
-        MQTTDATA["serveur"] = config.mqttServer;
-        MQTTDATA["user"]    = config.mqttUserName;
-        MQTTDATA["pass"]    = config.mqttPass;
-        MQTTDATA["port"]    = config.mqttPort;
-        MQTTDATA["permanent_topic"]   = config.permanentTopic;
-        MQTTDATA["send_topic"]   = config.sendTopic;
-        MQTTDATA["receive_topic"]   = config.receiveTopic;
-        
-        Sbidon = "";
-        serializeJson(doc, Sbidon);
-        message += Sbidon;
-        message += fl;
-      }
-      else {
-        message += "Erreur format";
-        message += fl;
-      }
-      sendSMSReply(smsstruct.sendernumber, slot);
+      message += F("Cpt Ala Tracker (x15s)=");
+      message += String(config.cptAla);
+      message += fl;
+      sendReply(Origine);
     }
-    else if (smsstruct.message.indexOf("MQTTSERVEUR") == 0) { // Serveur MQTT
-      // case sensitive
-      // MQTTSERVEUR=abcd.org
-      if (smsstruct.message.indexOf(char(61)) == 11) {
-        Sbidon = smsstruct.message.substring(12);
-        Serial.print("mqttserveur:"),Serial.print(Sbidon);
-        Serial.print(" ,"), Serial.println(Sbidon.length());
-        Sbidon.toCharArray(config.mqttServer, (Sbidon.length() + 1));
-        sauvConfig();
-      }
-      message += F("MQTTserveur =");
-      message += String(config.mqttServer);
-      message += F("\n au prochain demarrage");
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("GPRSDATA")) > -1) {
-      // Parametres GPRSDATA = "APN":"user":"pass"
-      // GPRSDATA="sl2sfr":"":""
-      // {"GPRSDATA":{"apn":"sl2sfr","user":"","pass":""}}
-      bool erreur = false;
-      bool formatsms = false;
-      if (smsstruct.message.indexOf(":") == 11) { // format json
-        DynamicJsonDocument doc(120);
-        DeserializationError err = deserializeJson(doc, smsstruct.message);
-        if (err) {
-          erreur = true;
-        }
-        else {
-          JsonObject gprsdata = doc["GPRSDATA"];
-          strncpy(config.apn, gprsdata["apn"], 11);
-          strncpy(config.gprsUser, gprsdata["user"], 11);
-          strncpy(config.gprsPass, gprsdata["pass"], 11);
-          // Serial.print("apn length:"),Serial.println(strlen(gprsdata["apn"]));
-          // Serial.print("apn:"),Serial.println(config.apn);
-          // Serial.print("user:"),Serial.println(config.gprsUser);
-          // Serial.print("pass:"),Serial.println(config.gprsPass);
-          sauvConfig();													// sauvegarde config
+  else if (Rmessage.indexOf(F("SETNETWORKMODE")) >= 0) {// Set Prefered network Mode
+      if(Rmessage.indexOf(char(61)) == 14){
+        int mode = Rmessage.substring(15).toInt();
+        if(mode == 2 || mode == 13 || mode == 14 || mode == 19 || mode == 38
+        || mode == 39 || mode == 51 || mode == 54){
+          modem.setNetworkMode(mode);
+          delay(1000);
         }
       }
-      else if ((smsstruct.message.indexOf(char(61))) == 8) { // format sms
-        formatsms = true;
-        byte cpt = 0;
-        byte i = 9;
-        do { // compte nombre de " doit etre =6
-          i = smsstruct.message.indexOf('"', i + 1);
-          cpt ++;
-        } while (i <= smsstruct.message.length());
-        Serial.print("nombre de \" :"), Serial.println(cpt);
-        if (cpt == 6) {
-          byte x = smsstruct.message.indexOf(':');
-          byte y = smsstruct.message.indexOf(':', x + 1);
-          byte z = smsstruct.message.lastIndexOf('"');
-          // Serial.printf("%d:%d:%d\n",x,y,z);
-          // Serial.printf("%d:%d:%d\n", x -1 - 10, y-1 - x-1-1, z - y-1-1);
-          if ((x - 11) < 11 && (y - x - 3) < 11 && (z - y - 2) < 11) { // verification longueur des variables
-            Sbidon = smsstruct.message.substring(10, x - 1);
-            Sbidon.toCharArray(config.apn, (Sbidon.length() + 1));
-            Sbidon = smsstruct.message.substring(x + 1 + 1 , y - 1);
-            Sbidon.toCharArray(config.gprsUser, (Sbidon.length() + 1));
-            Sbidon = smsstruct.message.substring(y + 1 + 1, z);
-            Sbidon.toCharArray(config.gprsPass, (Sbidon.length() + 1));
-
-            // Serial.print("apn:"),Serial.println(config.apn);
-            // Serial.print("user:"),Serial.println(config.gprsUser);
-            // Serial.print("pass:"),Serial.println(config.gprsPass);
-
-            sauvConfig();													// sauvegarde config
-          }
-          else {
-            erreur = true;
-          }
-        }
-        else {
-          erreur = true;
-        }
-      }
-      if (!erreur) {
-        if (formatsms) {
-          message += "Sera pris en compte au prochain demarrage\nOu envoyer RST maintenant" + fl;
-          message += "Parametres GPRS \"apn\":\"user\":\"pass\"";
-          message += fl + "\"";
-          message += String(config.apn);
-          message += "\":\"";
-          message += String(config.gprsUser);
-          message += "\":\"";
-          message += String(config.gprsPass);
-          message += "\"" + fl;
-        }
-        else {
-          DynamicJsonDocument doc(120);
-          JsonObject gprsdata = doc.createNestedObject("GPRSDATA");
-          gprsdata["apn"]  = config.apn;
-          gprsdata["user"] = config.gprsUser;
-          gprsdata["pass"] = config.gprsPass;
-          Sbidon = "";
-          serializeJson(doc, Sbidon);
-          message += Sbidon;
-          message += fl;
-        }
-      }
-      else {
-        message += "Erreur format";
-        message += fl;
-      }
-      sendSMSReply(smsstruct.sendernumber, slot);
+      message += String(modem.send_AT(F("+CNMP?")));
+      sendReply(Origine);
     }
-    else if (smsstruct.message == "RSTALACDEFBLC") {
-      // demande reset Alarme Cde Feu Blanc
-      EffaceAlaCdeFBlc();
-      message += "Reset Alarme en cours";
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message == "VIDELOG"){
-      SPIFFS.remove(filelog);
-      FileLogOnce = false;
-      message += "Effacement fichier log";
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message == "AUTOUPLOAD"){ // Auto upload log vers serveur FTP
-      if (smsstruct.message.indexOf(char(61)) == 10) {
-        byte c = smsstruct.message.substring(11).toInt();
-        if(c==0 || c==1){
-          config.autoupload = c;
-          sauvConfig();
-        }
-        message += "Autoupload:";
-        message += String(config.autoupload);
-        sendSMSReply(smsstruct.sendernumber, slot);
-      }
-    }
-    else if (smsstruct.message.indexOf(F("CPTALATRCK")) == 0 || smsstruct.message.indexOf(F("CPTALA")) == 0) { // Compteur Ala avant Flag
-        if (smsstruct.message.indexOf(char(61)) == 10) {
-          int c = smsstruct.message.substring(11).toInt();
-          if (c > 1 && c < 501) {
-            config.cptAla = c;
-            sauvConfig();
-          }
-        }
-        message += F("Cpt Ala Tracker (x15s)=");
-        message += String(config.cptAla);
-        message += fl;
-        sendSMSReply(smsstruct.sendernumber, slot);
-      }
-    else if (smsstruct.message.indexOf(F("SETNETWORKMODE")) >= 0) {// Set Prefered network Mode
-        if(smsstruct.message.indexOf(char(61)) == 14){
-          int mode = smsstruct.message.substring(15).toInt();
-          if(mode == 2 || mode == 13 || mode == 14 || mode == 19 || mode == 38
-          || mode == 39 || mode == 51 || mode == 54){
-            modem.setNetworkMode(mode);
-            delay(1000);
-          }
-        }
-        message += String(modem.send_AT(F("+CNMP?")));
-        sendSMSReply(smsstruct.sendernumber, slot);
-      }
-    else if (smsstruct.message.indexOf(F("SENDAT")) == 0){
-      // envoie commande AT au SIM7600
-      // ex: SENDAT=AT+CCLK="23/07/19,10:00:20+04" mise à l'heure
-      // attention DANGEREUX pas de verification!
-      if (smsstruct.message.indexOf(char(61)) == 6) {
-        String CdeAT = smsstruct.message.substring(7, smsstruct.message.length());
-        String reply = sendAT(CdeAT,"OK","ERROR",1000);
-        // Serial.print("reponse: "),Serial.println(reply);
-        message += String(reply);
-        sendSMSReply(smsstruct.sendernumber, slot);
-      }
-    }
-    else if (smsstruct.message.indexOf(F("MODEMINFO")) == 0){
-      // Get Modem Info
-      message += modem.getModemInfo();
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("CPTRESETMODEM")) == 0){
-      // Demande nombre de reset modem
-      message += F("Compteur reset Modem : ");
-      message += String(NbrResetModem);
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }else if (smsstruct.message.indexOf(F("NETWORKHISTO")) == 0){
-      // Demande Changement etat reseau
-      message_Monitoring_Reseau();
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf(F("TYPEBATT")) == 0){ // Type Batterie
-      if (smsstruct.message.indexOf(char(61)) == 8) {
-        int type = smsstruct.message.substring(9, smsstruct.message.length()).toInt();
-        if(type == 16 || type == 24){
-          config.TypeBatt = type;
-          sauvConfig();													// sauvegarde config
-        }
-      }
-      message += "Type Batterie:" + fl;
-      if(config.TypeBatt == 16) message += "Pb 12V";
-      if(config.TypeBatt == 24) message += "LiFePO 12.8V";
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    else if (smsstruct.message.indexOf("MESSAGEMODE") == 0) {
-      // mode communcication 0 SMS only, 1 SMS+MQTT
-      if (smsstruct.message.indexOf(char(61)) == 11) {
-        int i = atoi(smsstruct.message.substring(12).c_str());
-        if (i == 0  || i == 1){
-          if(i == 1 && config.messageMode == 1){ // MQTT activer GPRS
-            ConnectGPRS();
-          } else if(i == 0 && config.messageMode == 0) { // SMS desactiver GPRS
-            mqtt.disconnect();
-            modem.gprsDisconnect();
-          }
-          config.messageMode = i;
-          sauvConfig();													// sauvegarde config
-          Sbidon = F("messagemode=");
-          Sbidon += String(config.messageMode);
-          MajLog(nomAppelant, Sbidon);// renseigne log
-        }
-      }
-      message += "Message mode : ";
-      if(config.messageMode == 0){
-        message += "SMS";
-      } else { message += "SMS + MQTT";}
-      sendSMSReply(smsstruct.sendernumber, slot);
-    }
-    //**************************************
-    else {
-      message += F("Commande non reconnue ?");		//"Commande non reconnue ?"
-      sendSMSReply(smsstruct.sendernumber, slot);
+  else if (Rmessage.indexOf(F("SENDAT")) == 0){
+    // envoie commande AT au SIM7600
+    // ex: SENDAT=AT+CCLK="23/07/19,10:00:20+04" mise à l'heure
+    // attention DANGEREUX pas de verification!
+    if (Rmessage.indexOf(char(61)) == 6) {
+      String CdeAT = Rmessage.substring(7, Rmessage.length());
+      String reply = sendAT(CdeAT,"OK","ERROR",1000);
+      // Serial.print("reponse: "),Serial.println(reply);
+      message += String(reply);
+      sendReply(Origine);
     }
   }
+  else if (Rmessage.indexOf(F("MODEMINFO")) == 0){
+    // Get Modem Info
+    message += modem.getModemInfo();
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("CPTRESETMODEM")) == 0){
+    // Demande nombre de reset modem
+    message += F("Compteur reset Modem : ");
+    message += String(NbrResetModem);
+    sendReply(Origine);
+  }else if (Rmessage.indexOf(F("NETWORKHISTO")) == 0){
+    // Demande Changement etat reseau
+    message_Monitoring_Reseau();
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf(F("TYPEBATT")) == 0){ // Type Batterie
+    if (Rmessage.indexOf(char(61)) == 8) {
+      int type = Rmessage.substring(9, Rmessage.length()).toInt();
+      if(type == 16 || type == 24){
+        config.TypeBatt = type;
+        sauvConfig();													// sauvegarde config
+      }
+    }
+    message += "Type Batterie:" + fl;
+    if(config.TypeBatt == 16) message += "Pb 12V";
+    if(config.TypeBatt == 24) message += "LiFePO 12.8V";
+    sendReply(Origine);
+  }
+  else if (Rmessage.indexOf("MESSAGEMODE") == 0) {
+    // mode communcication 0 SMS only, 1 SMS+MQTT
+    if (Rmessage.indexOf(char(61)) == 11) {
+      int i = atoi(Rmessage.substring(12).c_str());
+      if (i == 0  || i == 1){
+        if(i == 1 && config.messageMode == 1){ // MQTT activer GPRS
+          ConnectGPRS();
+        } else if(i == 0 && config.messageMode == 0) { // SMS desactiver GPRS
+          mqtt.disconnect();
+          modem.gprsDisconnect();
+        }
+        config.messageMode = i;
+        sauvConfig();													// sauvegarde config
+        Sbidon = F("messagemode=");
+        Sbidon += String(config.messageMode);
+        MajLog(Origine, Sbidon);// renseigne log
+      }
+    }
+    message += "Message mode : ";
+    if(config.messageMode == 0){
+      message += "SMS";
+    } else { message += "SMS + MQTT";}
+    sendReply(Origine);
+  }
+  //**************************************
   else {
-    Sbidon = F("Appelant non reconnu ! ");
-    Sbidon += String(smsstruct.sendernumber);
-    Serial.println(Sbidon);
-    MajLog("Auto", Sbidon);// renseigne log
+    message += F("Commande non reconnue ?");		//"Commande non reconnue ?"
+    sendReply(Origine);
   }
-
 }
 //---------------------------------------------------------------------------
 void envoie_alarme() {
@@ -2641,60 +2592,62 @@ void envoie_alarme() {
     FlagLastAlarmeMQTT = FlagAlarmeMQTT;
   }
   if (SendEtat) { 						// si envoie Etat demandé
-    envoieGroupeSMS(0, 0);		// envoie groupé
+    envoieGroupeMessage(0);		// envoie groupé // A finir
     SendEtat = false;					// efface demande
   }
 }
 //---------------------------------------------------------------------------
-void envoieGroupeSMS(byte grp, bool vie) {
-  if (gsm) {
-    /* 
-      si grp = 0,
-      envoie un SMS à tous les numero existant (9 max) du Phone Book
-      si grp = 1,
-      envoie un SMS à tous les numero existant (9 max) du Phone Book
-      de la liste restreinte config.Pos_Pn_PB[x]=1
-      si grp = 3,
-      Message au Serveur seulement N°1 de la liste			
-      vie = true, ajoute au message nombre de reset modem
-      et envoie sms y compris si messageMode = 1 */
-    generationMessage();
-    if(vie){
-      message += F("Reset modem : ");
-      message += String(NbrResetModem);
-      message += fl;
-      message_Monitoring_Reseau();
-    }
-    for (byte Index = 1; Index < 10; Index++) {		// Balayage du PB
-      Phone = {"",""};      
-      if(modem.readPhonebookEntry(&Phone, Index)){
-        // Serial.print("groupe:"),Serial.println(grp);
-        // Serial.print("Index:"),Serial.println(Index);
-        // Serial.print("PB name:"),Serial.println(Phone.text);
-        if(Phone.number.length() > 0){
-          if (grp == 3){ // Serveur
-            if(Index == 1 && config.messageMode == 1){ // Serveur et MQTT
-              Envoyer_MQTT();
-            } else { // SMS
-              sendSMSReply(Phone.number, true);
-            }
-            break; // Sortir, Serveur seulement
-          } else if (grp == 0){ // tous SMS
-            sendSMSReply(Phone.number, true);
-          } else if (grp == 1) { // liste restreinte seulement
-            for (byte Index2 = 1; Index2 <10;Index2 ++){		// Balayage des Num Tel Autorisés=1 dans Phone Book
-              // Serial.print(Index),Serial.print(","),Serial.println(Phone.number);            
-              if (config.Pos_Pn_PB[Index2] == 1){          
-                sendSMSReply(Phone.number, true);
-              }
-            }
-          }
-        } else {
-          break;
-        }
-      }
-    }    
+void envoieGroupeMessage(bool vie) {
+  /* 
+    si grp = 0,
+    envoie un SMS à tous les numero existant (9 max) du Phone Book
+    si grp = 1,
+    envoie un SMS à tous les numero existant (9 max) du Phone Book
+    de la liste restreinte config.Pos_Pn_PB[x]=1
+    si grp = 3,
+    Message au Serveur seulement N°1 de la liste			
+    vie = true, ajoute au message nombre de reset modem
+    et envoie sms y compris si messageMode = 1 */
+  generationMessage();
+  if(vie){
+    message += F("Reset modem : ");
+    message += String(NbrResetModem);
+    message += fl;
+    message_Monitoring_Reseau();
   }
+  if(config.sendSMS){
+  // A Finir 
+    // for (byte Index = 1; Index < 10; Index++) {		// Balayage du PB
+    //   Phone = {"",""};      
+    //   if(modem.readPhonebookEntry(&Phone, Index)){
+    //     // Serial.print("groupe:"),Serial.println(grp);
+    //     // Serial.print("Index:"),Serial.println(Index);
+    //     // Serial.print("PB name:"),Serial.println(Phone.text);
+    //     if(Phone.number.length() > 0){
+    //       if (grp == 3){ // Serveur
+    //         if(Index == 1 && config.messageMode == 1){ // Serveur et MQTT
+    //           Envoyer_MQTT();
+    //         } else { // SMS
+    //           sendReply(Phone.number, true);
+    //         }
+    //         break; // Sortir, Serveur seulement
+    //       } else if (grp == 0){ // tous SMS
+    //         sendReply(Phone.number, true);
+    //       } else if (grp == 1) { // liste restreinte seulement
+    //         for (byte Index2 = 1; Index2 <10;Index2 ++){		// Balayage des Num Tel Autorisés=1 dans Phone Book
+    //           // Serial.print(Index),Serial.print(","),Serial.println(Phone.number);            
+    //           if (config.Pos_Pn_PB[Index2] == 1){          
+    //             sendReply(Phone.number, true);
+    //           }
+    //         }
+    //       }
+    //     } else {
+    //       break;
+    //     }
+    //   }
+    // }
+  }
+  Envoyer_MQTT();
 }
 //---------------------------------------------------------------------------
 void generationMessage() {
@@ -2791,47 +2744,48 @@ void generationMessage() {
   
 }
 //---------------------------------------------------------------------------
-void sendSMSReply(String num , int sms) {
+void sendReply(String Origine) {
   // sms = 0-98 sms, 99 reponse local, 255 MQTT
   int pseq = 0;
   if (gsm) {
     
-    if (sms == 255 && config.messageMode){ // MQTT
+    if (Origine == "MQTT" && config.messageMode){ // MQTT
       // reponse MQTT
       Envoyer_MQTT();
     }
-    if (sms < 99) { // SMS
-      Serial.print(F("SMS Sent :")),Serial.println(num);
-      if(message.length() > 150){ // decoupage sms en nseq parties
-        int nseq = message.length()/150;
-        if(nseq * 150 < message.length()){
-          nseq += 1;
-        }
-        int fin = 0;
-        for (byte i = 0; i < nseq;i++){
-          if((i+1)*150 > message.length()){
-            fin = message.length();
-          } else {
-            fin = (i+1)*150;
-          }
-          // Serial.print("seq"),Serial.print(i+1),Serial.print(":"),Serial.print(i*150),Serial.print(":"),Serial.print(fin),Serial.println(":"),Serial.println(message.substring((i*150),fin));
+    // A finir
+    // if (sms < 99) { // SMS
+    //   Serial.print(F("SMS Sent :")),Serial.println(num);
+    //   if(message.length() > 150){ // decoupage sms en nseq parties
+    //     int nseq = message.length()/150;
+    //     if(nseq * 150 < message.length()){
+    //       nseq += 1;
+    //     }
+    //     int fin = 0;
+    //     for (byte i = 0; i < nseq;i++){
+    //       if((i+1)*150 > message.length()){
+    //         fin = message.length();
+    //       } else {
+    //         fin = (i+1)*150;
+    //       }
+    //       // Serial.print("seq"),Serial.print(i+1),Serial.print(":"),Serial.print(i*150),Serial.print(":"),Serial.print(fin),Serial.println(":"),Serial.println(message.substring((i*150),fin));
         
-          Serial.print(F("sms part :")),Serial.print(i+1),Serial.println(message.substring(0,pseq));
-          if (!modem.sendSMS_Multi(num,message.substring((i*150),fin),i+1,nseq)) {
-            Serial.println(F("Failed"));
-          } else {
-            Serial.println(F("OK"));
-          }
-          delay(10);
-        }
-      } else { // 1 seul sms
-        if (!modem.sendSMS(num,message)) {
-          Serial.println(F("Failed"));
-        } else {
-          Serial.println(F("OK"));
-        }
-      }
-    }
+    //       Serial.print(F("sms part :")),Serial.print(i+1),Serial.println(message.substring(0,pseq));
+    //       if (!modem.sendSMS_Multi(num,message.substring((i*150),fin),i+1,nseq)) {
+    //         Serial.println(F("Failed"));
+    //       } else {
+    //         Serial.println(F("OK"));
+    //       }
+    //       delay(10);
+    //     }
+    //   } else { // 1 seul sms
+    //     if (!modem.sendSMS(num,message)) {
+    //       Serial.println(F("Failed"));
+    //     } else {
+    //       Serial.println(F("OK"));
+    //     }
+    //   }
+    // }
   }
   Serial.println(F("****************************"));
   Serial.println(message);
@@ -2840,11 +2794,10 @@ void sendSMSReply(String num , int sms) {
 //---------------------------------------------------------------------------
 void Envoyer_MQTT(){
   Serial.println("message a envoyer MQTT:"),Serial.println(message);
-  Sbidon = message;
-  Sbidon.toCharArray(replybuffer, Sbidon.length() + 1);
+  
   byte cpt =0;
 
-  while( mqtt.publish(config.sendTopic, replybuffer) != 1){
+  while( mqtt.publish(config.sendTopic, message.c_str()) != 1){
     Alarm.delay(500);
     if(cpt ++ > 2){
       Serial.print(F("send mqtt KO:")),Serial.println(cpt);
@@ -2962,7 +2915,7 @@ void SignalVie() {
   Serial.println(F("Signal vie"));
   if (gsm) {
     MajHeure();
-    // envoieGroupeSMS(0, 0);
+    // envoieGroupeMessage(0, 0);
     modem.deleteSmsMessage(0,4);// au cas ou, efface tous les SMS envoyé/reçu
   }
 
@@ -2980,7 +2933,7 @@ void SignalVie() {
     }
     Allumage(); // Violet 1, Blanc 0
   }
-  envoieGroupeSMS(0, 1);
+  envoieGroupeMessage(1);
   action_wakeup_reason(4);
 }
 //---------------------------------------------------------------------------
@@ -3152,10 +3105,7 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
       message += String(f.size());
       message += F("\nFichier sera efface a 300000");
       if (gsm) {
-        Phone = {"",""};
-        if(modem.readPhonebookEntry(&Phone, 1)){ // envoyé au premier num seulement
-          sendSMSReply(Phone.number, true);          
-        }
+        Envoyer_MQTT();
       }
     }
     else if (f.size() > 300000 && FileLogOnce) { // 292Ko 75000 lignes
@@ -3173,10 +3123,7 @@ void MajLog(String Id, String Raison) { // mise à jour fichier log en SPIFFS
         message += F("\nFichier efface");
       }
       if (gsm) {
-        Phone = {"",""};
-        if(modem.readPhonebookEntry(&Phone, 1)){ // envoyé au premier num seulement
-          sendSMSReply(Phone.number, true);          
-        }
+        Envoyer_MQTT();
       }
       f.close();
       SPIFFS.remove(filelog);
@@ -3381,14 +3328,14 @@ void PrintConfig() {
   Serial.print(F("mqtt pass = "))               , Serial.println(config.mqttPass);
   Serial.print(F("sendTopic = "))               , Serial.println(config.sendTopic);
   Serial.print(F("receiveTopic = "))            , Serial.println(config.receiveTopic);
-  Serial.print(F("permanentTopic = "))          , Serial.println(config.permanentTopic);
   Serial.print(F("msg Mode 0SMS,1SMS+MQTT = ")) , Serial.println(config.messageMode);
+  Serial.print(F("Send SMS autorisation = "))   , Serial.println(config.sendSMS);
   Serial.print(F("declage Heure ete = "))       , Serial.println(config.hete);
   Serial.print(F("declage Heure hiver = "))     , Serial.println(config.hhiver);
   Serial.print(F("autoupload = "))              , Serial.println(config.autoupload);
 }
 //---------------------------------------------------------------------------
-void ConnexionWifi(char* ssid, char* pwd, String number, int slot) {
+void ConnexionWifi(char* ssid, char* pwd, String origine) {
 
   messageId();
   Serial.print(F("connexion Wifi:")), Serial.print(ssid), Serial.print(char(44)), Serial.println(pwd);
@@ -3447,7 +3394,7 @@ void ConnexionWifi(char* ssid, char* pwd, String number, int slot) {
   else {
     message += F("Connexion Wifi impossible");
   }
-  sendSMSReply(number, slot);
+  sendReply(origine);
 
   // if (sms) { // suppression du SMS
   //   /* Obligatoire ici si non bouclage au redemarrage apres timeoutwifi
@@ -3660,7 +3607,7 @@ void action_wakeup_reason(byte wr) { // action en fonction du wake up
         // Feux = 1;
         // Allumage(); // Violet 1, Blanc 0
         // MajLog("Auto", "FCV");
-        // envoieGroupeSMS(0, 0);
+        // envoieGroupeMessage(0, 0);
       }
       else { // non circulé
         Sbidon = F("Jour noncircule ou nuit");
@@ -4042,11 +3989,6 @@ void HomePage() {
   webpage += F("</tr>");
 
   webpage += F("<tr>");
-  webpage += F("<td>mpermanent topic</td>");
-  webpage += F("<td>");	webpage += String(config.permanentTopic);	webpage += F("</td>");
-  webpage += F("</tr>");
-
-  webpage += F("<tr>");
   webpage += F("<td>msg Mode 0SMS,1SMS+MQTT</td>");
   webpage += F("<td>");	webpage += String(config.messageMode);	webpage += F("</td>");
   webpage += F("</tr>");
@@ -4110,19 +4052,20 @@ void Tel_listPage() {
   webpage += F("<th> Num&eacute;ro </th>");
   webpage += F("<th> Liste restreinte </th>");
   webpage += F("</tr>");
-  if (gsm) {
-    for (byte i = 1; i < 10; i++) {
-      if(modem.readPhonebookEntry(&Phone, i)){
-        webpage += F("<tr>");
-        webpage += F("<td>"); webpage += Phone.text; webpage += F("</td>");
-        webpage += F("<td>"); webpage += Phone.number ; webpage += F("</td>");
-        webpage += F("<td>"); webpage += String(config.Pos_Pn_PB[i]); webpage += F("</td>");
-        webpage += F("</tr>");
-      } else {
-        i = 10;
-      }
-    }
+  
+  File file = SPIFFS.open(filePhoneBook, "r");
+  while (file.available()) {
+    String ligne = file.readStringUntil('\n');
+    byte pos1 = ligne.indexOf(";");
+    String number   = ligne.substring(0,pos1);
+    String name = ligne.substring(pos1+1,ligne.length()-1);
+    webpage += F("<tr>");
+    webpage += F("<td>"); webpage += String(name); webpage += F("</td>");
+    webpage += F("<td>"); webpage += String(number); webpage += F("</td>");
+    webpage += F("</tr>");
   }
+  file.close();
+
   webpage += F("</table><br>");
   append_page_footer();
   SendHTML_Content();
@@ -4640,7 +4583,8 @@ void gestionTaquet(){
           Allumage(); // Violet 0, Blanc Secteur Cli rapide
           MajLog(Memo_Demande_Feux[0], "SCV");
           if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
-        }else if (Memo_Demande_Feux[2].indexOf("V") == 0) {
+        }
+        else if (Memo_Demande_Feux[2].indexOf("V") == 0) {
           // Serial.print("position V:"),Serial.println(Memo_Demande_Feux[2].indexOf("V"));
           Feux = 7;
           Allumage(); // Violet Cli, Blanc 0
@@ -4648,20 +4592,22 @@ void gestionTaquet(){
           if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         }
         generationMessage();
-        char number[13];
-        Memo_Demande_Feux[1].toCharArray(number, Memo_Demande_Feux[1].length() + 1);
-        bool smsserveur = false;
-        Phone = {"",""};
-        modem.readPhonebookEntry(&Phone, 1); // lecture numero serveur 1
-        if (Memo_Demande_Feux[1] == Phone.number) {
-          smsserveur = true; // si demande provient du serveur index=1
-        }
-        if(Memo_Demande_Feux[0] != "console"){
-          if(!smsserveur){
-            sendSMSReply(number, true); // reponse demandeur si pas serveur
-          }
-        }
-        envoieGroupeSMS(3, 0); // envoie serveur
+        // A finir
+        // char number[13];
+        // Memo_Demande_Feux[1].toCharArray(number, Memo_Demande_Feux[1].length() + 1);
+        // bool smsserveur = false;
+        // Phone = {"",""};
+        // modem.readPhonebookEntry(&Phone, 1); // lecture numero serveur 1
+        // if (Memo_Demande_Feux[1] == Phone.number) {
+        //   smsserveur = true; // si demande provient du serveur index=1
+        // }
+        // if(Memo_Demande_Feux[0] != "console"){
+        //   // A finir
+        //   // if(!smsserveur){
+        //   //   sendReply(number, true); // reponse demandeur si pas serveur
+        //   // }
+        // }
+        envoieGroupeMessage(0); // envoie serveur // A finir
         FlagDemande_Feux = false; // efface demande
       }
       else{ // pas de demande, juste ouverture taquet, Feux = violet
@@ -4669,14 +4615,14 @@ void gestionTaquet(){
         Serial.println("Ouverture taquet");
         MajLog("Auto", "FCV");
         generationMessage();
-        envoieGroupeSMS(3, 0); // envoie serveur
+        envoieGroupeMessage(0); // envoie serveur // A finir
       }
     } else { // Taquet fermé
       Serial.println("Taquet ferme");
       Feux = 5; // Feux F + Carré
       Allumage();
       MajLog("Auto", "CCV");
-      envoieGroupeSMS(3, 0); // envoie serveur
+      envoieGroupeMessage(0); // envoie serveur // A finir
     }
   }
   FlagLastTqt_1 = FlagTqt_1;
@@ -4687,7 +4633,7 @@ void gestionTaquet(){
     } else {
       MajLog("Auto", "gestiontaquet Taquet V3 ferme");
     }
-    envoieGroupeSMS(3, 0); // envoie serveur
+    envoieGroupeMessage(0); // envoie serveur // A finir
     FlagLastTqt_2 = FlagTqt_2;
   }
 }
@@ -4729,24 +4675,26 @@ boolean mqttConnect() {
     return false;
   }
   Serial.println(F(" success"));
-  if(mqtt.subscribe(config.permanentTopic,1) == 1){
-    Serial.print(config.permanentTopic),Serial.println(" subcribed");
-  }
+  
   if(mqtt.subscribe(config.receiveTopic) == 1){
     Serial.print(config.receiveTopic),Serial.println(" subcribed");
   }
   return mqtt.connected();
 }
 //---------------------------------------------------------------------------
-bool Cherche_N_PB(String numero){ // Cherche numero dans PB
-  for (byte idx = 1; idx < 10; idx++){
-    Phone = {"",""};
-    if(modem.readPhonebookEntry(&Phone, idx)){
-      if(Phone.number == numero){
-        Serial.print(F("Nom :")), Serial.println(Phone.text);
+// Cherche number existe dans fichier PhoneBook
+bool Cherche_N_PB(String number){
+  if (SPIFFS.exists(filePhoneBook)) {
+    File file = SPIFFS.open(filePhoneBook, "r");
+    while (file.available()) {
+      String s = file.readStringUntil('\n');
+      if(s.indexOf(number)>-1){
+        Serial.print("N° trouve:"),Serial.println(s);
+        file.close();
         return true;
       }
-    }// else { idx = 10;}    
+    }
+    file.close();
   }
   return false;
 }
@@ -4872,22 +4820,11 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
     Serial.print((char)payload[i]);
     Sbidon += (char)payload[i];
   }
-  Sbidon.toCharArray(replybuffer, Sbidon.length() + 1);
+  Rmessage = Sbidon;
   Serial.println();
 
   if(strcmp(topic,config.receiveTopic) == 0){
-    traite_sms(255);
-  } else if (strcmp(topic,config.permanentTopic) == 0){
-    if(Sbidon.length() > 0){
-      //renvoyer "" sur permanentTopic pour eviter repetition
-      char rep[2] = "";
-      if(mqtt.publish(config.permanentTopic, rep, true)){
-        Serial.println("efface permanent topic OK");
-      } else {
-        Serial.println("efface permanent topic KO");
-      }
-      traite_sms(255);
-    }
+    traite_sms("MQTT");
   }
 }
 /* --------------------  test local serial seulement ----------------------*/
@@ -4909,22 +4846,10 @@ void recvOneChar() {
   }
   if (newData == true) {
     Serial.println(serialmessage);
-    interpretemessage(serialmessage);
+    Rmessage = serialmessage;
+    traite_sms("Local");//	traitement en mode local
     newData = false;
     serialmessage = "";
-  }
-}
-
-void interpretemessage(String demande) {
-  String bidons;
-  //demande.toUpperCase();
-  if (demande.indexOf(char(61)) == 0) {
-    // Serial.print("message console:"),Serial.println(demande);
-    // message = demande.substring(1);
-    bidons = demande.substring(1);
-    bidons.toCharArray(replybuffer, bidons.length() + 1);
-    // Serial.print("message console:"),Serial.println(message);
-    traite_sms(99);//	traitement SMS en mode test local
   }
 }
 //---------------------------------------------------------------------------
