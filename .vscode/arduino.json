@@ -1,6 +1,7 @@
 {
-    "board":"esp32:esp32:d32",
-    "sketch":"ESP32_Signalisation.ino",
-    "output":"./build",
-    "defines":"USBCON"
+    "board": "esp32:esp32:d32",
+    "sketch": "ESP32_Signalisation.ino",
+    "output": "./build",
+    "defines": "USBCON",
+    "port": "COM6"
 }
