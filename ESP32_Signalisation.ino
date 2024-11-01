@@ -71,14 +71,23 @@
   KO creation entree TOPIC, chargement new Json KO?
   OK TEMPOAUTOF si changement parametre il faut reprogrammer ALARME Auto_F
   OK mois=
-  A tester Taquet 1 et 2
 
-  Gestion reponse à demande quand taquet fermé
-  RST ne marche pas
+  OK A tester Taquet 1 et 2
+  OK Gestion reponse à demande quand taquet fermé
+  OK RST ne marche pas
   Reponse SMS à faire
-  Verif si OK reponse PARAM en MQTT
-  revoir message Vie
-  IMEI KO
+  OK Verif si OK reponse PARAM en MQTT
+  OK revoir message Vie
+  OK IMEI KO
+
+  bug Allume pas activé ? semble OK
+
+  avant deep sleep faire mqtt disconnect propre
+
+  simplifier majheure au démarrage 
+  https://randomnerdtutorials.com/esp32-ntp-timezones-daylight-saving/
+
+  apres OTA wifi ne redemarre pas de temps en temps ?
 
   Version SIM7600G
   ok upload log https://forum.arduino.cc/t/ftp-upload-sim7600/931213/2
@@ -138,7 +147,7 @@ int    Magique    = 3;
 #include <Battpct.h>
 #include "defs.h"
 #include <TinyGsmClient.h>         // librairie TinyGSM revue PhC 0.12.0
-#include <PubSubClient.h>          // modifié define MQTT_MAX_PACKET_SIZE 256
+#include <PubSubClient.h>
 #include <Time.h>
 #include <TimeAlarms.h>
 #include <WiFi.h>
@@ -314,6 +323,9 @@ struct  config_t           // Structure configuration sauvée dans file config
   uint16_t keepAlive;      // Paramètre keep alive de Pubsubclient
 } ;
 config_t config;
+
+char willTopic[7];
+
 int N_Y, N_M, N_D, N_H, N_m, N_S; // variable Date/Time temporaire
 uint32_t lastReconnectMQTTAttempt = 0;
 uint32_t lastReconnectGPRSAttempt = 0;
@@ -455,6 +467,9 @@ void setup() {
     sauvConfig();
   }
   PrintConfig();
+
+  strncpy(willTopic,("S/will"),sizeof(willTopic));// topic commun
+
   Id  = String(config.Idchar);
   Id += fl;
 
@@ -476,7 +491,8 @@ void setup() {
   })
   .onEnd([]() {
     Serial.println("End");
-    delay(100);
+    delay(1000);
+    ESP.restart();
     ResetHard();
   })
   .onProgress([](unsigned int progress, unsigned int total) {
@@ -534,6 +550,7 @@ void setup() {
 
     Serial.print("Signal quality:"), Serial.println(read_RSSI());
 
+    mqttClient.setBufferSize(384);
     mqttClient.setKeepAlive(config.keepAlive);                // Set Pubsub keep alive interval
     mqttClient.setServer(config.mqttServer, config.mqttPort); // Set the MQTT broker details.
     mqttClient.setCallback(mqttSubscriptionCallback);         // Set the MQTT message handler function.
@@ -816,6 +833,7 @@ void Acquisition() {
       mqttConnect(); // tentative reconnexion MQTT
       if (nalaMQTT ++ > config.cptAla) {
         FlagAlarmeMQTT = true;
+        // A faire action pour reconnecter MQTT
         nalaMQTT = 0;
       }
       Serial.print(F("AlarmeMQTT: ")),Serial.println(nalaMQTT);
@@ -1319,19 +1337,14 @@ fin_tel:
     //   message += F("pas de mise à l'heure en local");
     // }
     MajHeure(true);			// mise a l'heure forcée
+    messageId();
     message += "Mise à l'heure NTP";
     sendReply(Origine);
   }
   else if (gsm && Rmessage.indexOf(F("IMEI")) > -1) {
-    // char imei[15] = {0}; // MUST use a 16 character buffer for IMEI!
-    String modemInfo = modem.getModemInfo(); // IMEI: 862195XXXXXX785
-    byte pos = modemInfo.indexOf(F("IMEI:"));
-    if (pos > 0) {
-      // Serial.print(F("Module IMEI: ")), Serial.println(modemInfo.substring(pos+6, pos+6+15));
-      message += F("IMEI = ");
-      message += modemInfo.substring(pos+6, pos+6+15);
-      sendReply(Origine);
-    }
+    message += F("IMEI = ");
+    message += modem.getIMEI();
+    sendReply(Origine);
   }
   else if (Rmessage.indexOf(F("FIN")) == 0) {			//	Heure Fin de journée
     if ((Rmessage.indexOf(char(61))) == 3) {
@@ -1808,12 +1821,14 @@ fin_tel:
     else {
       // message += "non reconnu" + fl;
     }
-    generationMessage();
     if (Feux != 0) { // seulement si different de DCV, doublon DCV envoie automatiquement une reponse dans Extinction()
       envoieGroupeMessage(false,true); // envoie serveur
     }
     // evite de repondre 2 fois au serveur
-    if (!smsserveur)sendReply(Origine); // reponse si pas serveur
+    if (!smsserveur){
+      generationMessage();
+      sendReply(Origine); // reponse si pas serveur
+    }
   }
   else if (Rmessage.indexOf(F("FBLCPWM")) == 0) {
     if (Rmessage.substring(7, 8) == "=") {
@@ -2547,10 +2562,10 @@ void envoieGroupeMessage(bool vie, bool Serveur) {
    */
   generationMessage();
   if(vie){
-    message += F("Reset modem : ");
-    message += String(NbrResetModem);
-    message += fl;
-    message_Monitoring_Reseau();
+    // message += F("Reset modem : ");
+    // message += String(NbrResetModem);
+    // message += fl;
+    // message_Monitoring_Reseau();
   }
   if(config.sendSMS){
   // A Finir 
@@ -2706,20 +2721,22 @@ void sendReply(String Origine) {
 // destinataire = true Serveur, false à User
 void Envoyer_MQTT(bool dest){
   Serial.print(F("send mqtt "));
+  Serial.print(dest ? config.sendTopic[0] : config.sendTopic[1]);
+  // Serial.println(message);
   if(dest){ // message Serveur
     if (mqttClient.publish(config.sendTopic[0], message.c_str())){ // Serveur
       AlarmeMQTT = false;
-      Serial.println(F("OK"));
+      Serial.println(F(" OK"));
     } else {
-      Serial.println(F("KO"));
+      Serial.println(F(" KO"));
       AlarmeMQTT = true;
     }
   } else { // message user
     if(mqttClient.publish(config.sendTopic[1], message.c_str())){ // User
       AlarmeMQTT = false;
-      Serial.println(F("OK"));
+      Serial.println(F(" OK"));
     } else {
-      Serial.println(F("KO"));
+      Serial.println(F(" KO"));
       AlarmeMQTT = true;
     }
   }
@@ -3301,11 +3318,6 @@ void ConnexionWifi(char* ssid, char* pwd, String origine) {
   }
   sendReply(origine);
 
-  // if (sms) { // suppression du SMS
-  //   /* Obligatoire ici si non bouclage au redemarrage apres timeoutwifi
-  //     ou OTA sms demande Wifi toujours present */
-  //   EffaceSMS(slot);
-  // }
   debut = millis();
   if (!error) {
     /* boucle permettant de faire une mise à jour OTA et serveur, avec un timeout en cas de blocage */
@@ -3455,6 +3467,7 @@ void DebutSleep() {
 
   byte i = 0;
   if (gsm) {
+    mqttClient.disconnect();
     while (!modem.setPhoneFunctionality(0)) { // CFUN=0 minimum functionality
       Alarm.delay(100);
       if (i++ > 10) break;
@@ -3502,7 +3515,6 @@ void action_wakeup_reason(byte wr) {
 
     case 4: // SP_SLEEP_WAKEUP_TIMER
       if (FirstWakeup) { // premier wake up du jour avant DebutJour
-        // SignalVie();
         // ne rien faire, attendre DebutJour
         FirstWakeup = false;
         if (HActuelledec() > config.DebutJour) {
@@ -4473,6 +4485,7 @@ void VerifTaquet_2(){
 }
 //---------------------------------------------------------------------------
 void gestionTaquet(){
+  static bool flagchange = false;
   if(FlagTqt_1 != FlagLastTqt_1){ // Taquet a changé d'etat
     if(FlagTqt_1){ // taquet ouvert
       if(FlagDemande_Feux){ // demande changement etat feux en cours
@@ -4505,29 +4518,18 @@ void gestionTaquet(){
           if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         }
         generationMessage();
-        // A finir
-        // char number[13];
-        // Memo_Demande_Feux[1].toCharArray(number, Memo_Demande_Feux[1].length() + 1);
-        // bool smsserveur = false;
-        // Phone = {"",""};
-        // modem.readPhonebookEntry(&Phone, 1); // lecture numero serveur 1
-        // if (Memo_Demande_Feux[1] == Phone.number) {
-        //   smsserveur = true; // si demande provient du serveur index=1
-        // }
-        // if(Memo_Demande_Feux[0] != "console"){
-        //   // A finir
-        //   // if(!smsserveur){
-        //   //   sendReply(number, true); // reponse demandeur si pas serveur
-        //   // }
-        // }
-        envoieGroupeMessage(false,true); // envoie serveur
+        sendReply("MQTT0"); // envoie serveur
+        if(Memo_Demande_Feux[1] == "MQTT1"){ // reponse User
+          sendReply("MQTT1");
+        } else if (Memo_Demande_Feux[1] == "Local"){ // reponse Local
+          sendReply("Local");
+        }
         FlagDemande_Feux = false; // efface demande
       }
       else{ // pas de demande, juste ouverture taquet, Feux = violet
         Feux = 1;
         Serial.println("Ouverture taquet");
         MajLog("Auto", "FCV");
-        generationMessage();
         envoieGroupeMessage(false,true); // envoie serveur
       }
     } else { // Taquet fermé
@@ -4537,6 +4539,7 @@ void gestionTaquet(){
       MajLog("Auto", "CCV");
       envoieGroupeMessage(false,true); // envoie serveur
     }
+    flagchange = true;
   }
   FlagLastTqt_1 = FlagTqt_1;
 
@@ -4548,6 +4551,11 @@ void gestionTaquet(){
     }
     envoieGroupeMessage(false,true); // envoie serveur
     FlagLastTqt_2 = FlagTqt_2;
+    flagchange = true;
+  }
+  if(flagchange){
+    flagchange = false;
+    Acquisition();
   }
 }
 //---------------------------------------------------------------------------
@@ -4584,7 +4592,7 @@ void mqttConnect() {
   if (modem.isGprsConnected()) {
     // Connect to the MQTT broker.
     Serial.print("Attempting MQTT connection...");
-    if ( mqttClient.connect(config.Idchar, config.mqttUserName, config.mqttPass)) {
+    if ( mqttClient.connect(config.Idchar, config.mqttUserName, config.mqttPass,willTopic,1,true,config.Idchar,false)) {
       Serial.println( "Connected with Client ID:  " + String(config.Idchar) + " User " + String(config.mqttUserName) + " Pwd " + String(config.mqttPass));
       AlarmeMQTT = false;
     } else {
@@ -4765,9 +4773,11 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
   Rmessage = Sbidon;
   Serial.println();
 
-  if(strcmp(topic,config.recvTopic[0]) == 0){ // Serveur
+  if(strcmp(topic,config.recvTopic[0]) == 0 && Sbidon.length() !=0){ // Serveur
+    // mqttClient.publish(config.recvTopic[0],""); // efface topic sur serveur    
     traite_sms("MQTT0");
-  } else if(strcmp(topic,config.recvTopic[1]) == 0){ // User
+  } else if(strcmp(topic,config.recvTopic[1]) == 0  && Sbidon.length() !=0){ // User
+    // mqttClient.publish(config.recvTopic[1],""); // efface topic sur serveur
     traite_sms("MQTT1");
   }
 }
