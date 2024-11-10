@@ -23,7 +23,7 @@
   Alimentation sur panneaux solaires
 
   mode deep sleep
-  reveille tout les matin 06h55
+  reveille tout les matin 06h55 (debut-anticip)
   reception des SMS en attente
   apres 5 min de fonctionnement (ex: 2mn pour reception/suppression 8 SMS, 4mn 14SMS)
   envoie sms signal vie
@@ -34,9 +34,9 @@
   en fin de journée retour sleep jusqu'a debut
 
   si non circulé,
-  retour SIM7600 et ESP32 en sleep reveil toute les heures
+  retour SIM7000 et ESP32 en sleep reveil toute les heures
   au reveil attendre au moins 30s pour que les SMS arrivent,
-  quand plus de SMS et traitement retour sleep 1H00
+  quand plus de SMS et traitement retour sleep 1H00(config.RepeatWakeUp)
 
   Surveillance Batterie solaire
 	Adc interne instable 2 à 3.5% erreurs!
@@ -65,6 +65,8 @@
 	apres OTA relancer un RST
 
   Version SIM7000G
+  Revision:1529B08SIM7000G utilisé pour test
+
 	to do
   OK AlarmeMQTT si KO une fois, si pas de publish reste KO et comptage -> envoie Alarme
   OK reponse PARAM 251caracteres trop long err MQTT, a remanier
@@ -81,8 +83,6 @@
   OK IMEI KO
 
   bug Allume pas activé ? semble OK
-
-  avant deep sleep faire mqtt disconnect propre
 
   simplifier majheure au démarrage 
   https://randomnerdtutorials.com/esp32-ntp-timezones-daylight-saving/
@@ -174,10 +174,9 @@ String  webpage = "";
 bool    LittleFS_present = false;
 #include "CSS.h"               // pageweb
 
-// #define RESET_PIN     18   // declaré par Sim800l.h
 #define LED_PIN       5    // 
 #define PinChckFblc   4    // Entrée verification Cde Feu Blanc
-#define MODEM_PWRKEY  14
+#define MODEM_PWRKEY  18   // Powerkey SIM7000
 #define PinBattProc   35   // liaison interne carte Lolin32 adc
 #define PinBattSol    39   // Batterie générale 12V adc VN
 #define PinBattUSB    36   // V USB 5V adc VP 36, 25 ADC2 pas utilisable avec Wifi
@@ -187,8 +186,8 @@ bool    LittleFS_present = false;
 #define PinFBlc       21   // Sortie Commande Feu Blanc
 #define PinConvert    19   // Sortie Commande Convertisseur 12/24V
 #define PinFVlt       15   // Sortie Commande Feu Violet
-#define RX_PIN        16   // TX Sim7600
-#define TX_PIN        17   // RX Sim7600
+#define RX_PIN        17   // TX Sim7600
+#define TX_PIN        16   // RX Sim7600
 #define PinReset      13   // Reset Hard
 #define PinLum        34   // Mesure Luminosité
 #define PinAlimLum    25   // Alimentation LDR
@@ -401,6 +400,7 @@ void setup() {
     Serial.println(modem.getModemInfo());
     modem.setNetworkMode(38);  // Network Mode LTE
     modem.setPreferredMode(1); // Mode CAT-M
+    modem.disableGPS();        // Arret GPS
   }
   // parametrage PWM pour les feux
   // https://randomnerdtutorials.com/esp32-pwm-arduino-ide/
@@ -445,7 +445,7 @@ void setup() {
     config.hhiver        = 1; // heure
     config.sendSMS       = false; // pas d'envoie de SMS
     config.keepAlive     = 300; // 5mn, IMPERATIF pour réduire conso data
-    config.autoupload    = true;
+    config.autoupload    = false;
     config.cptAla        = 10; // 11*Acquisition time
     String temp          = "TPCF_CV65";
     temp.toCharArray(config.Idchar, 11);
@@ -1221,6 +1221,7 @@ fin_tel:
   else if (Rmessage.indexOf(F("SYS")) > -1) {
     if (gsm) {
       message += modem.getOperator(); // Operateur
+      message += fl;
       byte n = modem.getRegistrationStatus();        
       if (n == 5) {
         message += F(("rmg, "));// roaming 1.0s
@@ -2678,22 +2679,23 @@ void generationMessage() {
   if(FlagAlarmeCdeFBlc){
     message += "Defaut Cde Feu Blanc" + fl;
   }
-  
-  message += F("Gprs ");
-  if (FlagAlarmeGprs) {
-    message += F("KO");
-  } else {
-    message += F("OK");
-  }
-  message += fl;
-  message += F("Mqtt ");
-  if (FlagAlarmeMQTT) {
-    message += F("KO");
-  } else {
-    message += F("OK");
-  }
-  message += fl;
-  
+  if(config.sendSMS){
+    message += F("Gprs ");
+    if (FlagAlarmeGprs) {
+      message += F("KO");
+    } else {
+      message += F("OK");
+    }
+    message += fl;
+
+    message += F("Mqtt ");
+    if (FlagAlarmeMQTT) {
+      message += F("KO");
+    } else {
+      message += F("OK");
+    }
+    message += fl;
+  }  
 }
 //---------------------------------------------------------------------------
 // Envoyer une réponse
@@ -2724,7 +2726,7 @@ void Envoyer_MQTT(bool dest){
   Serial.print(dest ? config.sendTopic[0] : config.sendTopic[1]);
   // Serial.println(message);
   if(dest){ // message Serveur
-    if (mqttClient.publish(config.sendTopic[0], message.c_str())){ // Serveur
+    if (mqttClient.publish(config.sendTopic[0], message.c_str()), true){ // Serveur
       AlarmeMQTT = false;
       Serial.println(F(" OK"));
     } else {
@@ -2732,7 +2734,7 @@ void Envoyer_MQTT(bool dest){
       AlarmeMQTT = true;
     }
   } else { // message user
-    if(mqttClient.publish(config.sendTopic[1], message.c_str())){ // User
+    if(mqttClient.publish(config.sendTopic[1], message.c_str()), true){ // User
       AlarmeMQTT = false;
       Serial.println(F(" OK"));
     } else {
@@ -3467,11 +3469,13 @@ void DebutSleep() {
 
   byte i = 0;
   if (gsm) {
-    mqttClient.disconnect();
-    while (!modem.setPhoneFunctionality(0)) { // CFUN=0 minimum functionality
+    // mqttClient.disconnect(); // ne pas faire disconnect pour garder session active
+    delay(1000);
+    while (!modem.poweroff()) { // Power off
       Alarm.delay(100);
       if (i++ > 10) break;
     }
+    Serial.print("power off:"),Serial.println(i);
   }
   Serial.flush();
   esp_deep_sleep_start();
@@ -4267,30 +4271,30 @@ void handleDateTime() {
 //---------------------------------------------------------------------------
 bool FTP_Connect(){
   char charbidon[100];
-  strncpy(charbidon, "AT+FTPCID=1",12);
+  strncpy(charbidon, "+FTPCID=1",12);
   Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
   
-  sprintf(charbidon,"AT+FTPSERV=\"%s\"", config.ftpServeur);
+  sprintf(charbidon,"+FTPSERV=\"%s\"", config.ftpServeur);
   Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
   Serial.print("FTP serveur :"), Serial.println(Sbidon);
 
-  sprintf(charbidon, "AT+FTPPORT=%i", config.ftpPort);
+  sprintf(charbidon, "+FTPPORT=%i", config.ftpPort);
   Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
   Serial.print("FTP port :"), Serial.println(Sbidon);
 
-  sprintf(charbidon, "AT+FTPUN=\"%s\"", config.ftpUser);
+  sprintf(charbidon, "+FTPUN=\"%s\"", config.ftpUser);
   Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
   Serial.print("FTP user :"), Serial.println(Sbidon);
 
-  sprintf(charbidon, "AT+FTPPW=\"%s\"", config.ftpPass);
+  sprintf(charbidon, "+FTPPW=\"%s\"", config.ftpPass);
   // modem.sendAT(String(charbidon));
   // Sbidon = sendAT(String(charbidon),"OK","ERROR",10000);
   Serial.print("FTP pass :"), Serial.println(modem.send_AT(String(charbidon)));
 
-  sprintf(charbidon, "AT+FTPPUT=1"); // Ouverture FTP
-  // Sbidon = sendAT(String(charbidon),"OK","ERROR",10000);
-  modem.send_AT(String(charbidon));
-  Serial.print("FTP Start :"), Serial.println(modem.waitResponse("OK","ERROR"));
+  // sprintf(charbidon, "+FTPPUT=1"); // Ouverture FTP
+  // // Sbidon = sendAT(String(charbidon),"OK","ERROR",10000);
+  // modem.send_AT(String(charbidon));
+  // Serial.print("FTP Start :"), Serial.println(modem.waitResponse("OK","ERROR"));
   // modem.waitResponse("OK","ERROR");
   // 
   
@@ -4300,7 +4304,7 @@ bool FTP_Connect(){
 }
 //---------------------------------------------------------------------------
   bool FTP_Quit() {
-    sendAT(F("AT+FTPQUIT"), "OK","ERROR", 1000);
+    sendAT(F("+FTPQUIT"), "OK","ERROR", 1000);
   // if (! sendAT(F("AT+FTPQUIT"), "OK","ERROR", 10000))
   //   return false;
   Serial.println("A finir gestion erreur");
@@ -4315,35 +4319,64 @@ bool FTP_upload_function (char *file2upload){
     return false;
   }
   delay(1000);
-  FTP_Quit();
-  return true;
+  // FTP_Quit();
+  // return true;
 
   // Upload du fichier
-  String tosend = "AT+CFTPSPUTFILE=\"" + String(config.Idchar) + String(file2upload) + "\",3"; // 3 pour E:
-  Serial.print("FTP Upload :"), Serial.println(tosend);
-  Sbidon = sendAT(tosend,"OK","ERROR",10000);
-  Serial.print("FTP Upload :"), Serial.println(Sbidon);
-  if(Sbidon.indexOf("+CFTPSPUTFILE: 0")>-1){
-    Serial.println("Upload OK");
-  } else {
-    Serial.println("Upload KO");// sortir
-    sendAT("AT+CFTPSLOGOUT","OK","ERROR",1000);
-    sendAT("AT+CFTPSSTOP","OK","ERROR",1000);
-    return false;
-  }
-  delay(500);
+  char charbidon[100];
+  char path[50];
+  // destination chemin et filename
+  sprintf(path,"/home/ftptpcf/%s/",config.Idchar);
+  sprintf(charbidon, "+FTPPUTPATH=\"%s\"", path);
+  Serial.println(charbidon);
+  Serial.println(modem.send_AT(String(charbidon)));
+  Serial.print("FTP put path fichier :"), Serial.println(modem.waitResponse("OK","ERROR"));
+
+  sprintf(charbidon, "+FTPPUTNAME=\"%s\"", "coeff.txt");
+  Serial.println(charbidon);
+  Serial.println(modem.send_AT(String(charbidon)));
+  Serial.print("FTP put name fichier :"), Serial.println(modem.waitResponse("OK","ERROR"));
+
+  // Ouvrir FTP
+  char data[1000] = "Bonjour depuis LTE-M";
+  Serial.println(modem.send_AT("+FTPPUT=1"));
+  Serial.print("FTP open :"), Serial.println(modem.waitResponse("+FTPPUT:","ERROR"));
+  // envoyer data
+
+
+  // Fermer FTP
+  Serial.println(modem.send_AT("+FTPPUT=2,0"));
+  Serial.print("FTP close :"), Serial.println(modem.waitResponse("+FTPPUT:","ERROR"));
+
+  uint16_t numBytes = strlen(data);
+  uint16_t remBytes = numBytes;
+
+  // while (remBytes > 0) {
+  //   if (remBytes > maxlen) sprintf(auxStr, "AT+FTPPUT=2,%i", maxlen);
+  //   else sprintf(auxStr, "AT+FTPPUT=2,%i", remBytes);
+
+  //   getReply(auxStr);
+
+  //   uint16_t sentBytes;
+  //   if (! parseReply(F("+FTPPUT: 2"), &sentBytes, ',', 1))
+  //     return false;
+
+  //   // DEBUG_PRINTLN(sentBytes); // DEBUG
+
+  //   if (! sendCheckReply(content, ok_reply, 10000))
+  //     return false;
+
+  //   remBytes = remBytes - sentBytes; // Decrement counter
+
+  //   // Check again for max length to send, repeat if needed
+  //   // readline(10000);
+  //   // DEBUG_PRINT(F("\t<--- ")); DEBUG_PRINTLN(replybuffer);
+  //   // if (! parseReply(F("+FTPPUT: 1,1"), &maxlen, ',', 1))
+  //   //   return false;
+  // }
+
   // relecture du repertoir sur FTP pour verification presence du fichier uploadé
-  tosend = "AT+CFTPSLIST=\"" + String(config.Idchar) + "\"";
-  Sbidon = sendAT(tosend,"+CFTPSLIST","ERROR",10000);
-  Serial.print("FTP Dir :"), Serial.println(Sbidon);
-  if(Sbidon.indexOf(String(file2upload).substring(1))>-1){// apres le / de debut
-    Serial.println("fichier uploader avec succes");
-  } else {
-    Serial.println("fichier uploader avec erreur");
-    sendAT("AT+CFTPSLOGOUT","OK","ERROR",1000);
-    sendAT("AT+CFTPSSTOP","OK","ERROR",1000);
-    return false;
-  }
+  
 
   FTP_Quit();
   return true;
@@ -4812,13 +4845,15 @@ int modem_on() {
     digitalWrite(LED_PIN, LOW);
 
     /*
-    MODEM_PWRKEY IO:4 The power-on signal of the modulator must be given to it,
+    MODEM_PWRKEY IO:18 The power-on signal of the modulator must be given to it,
     otherwise the modulator will not reply when the command is sent
     */
     pinMode(MODEM_PWRKEY, OUTPUT);
     digitalWrite(MODEM_PWRKEY, HIGH);
-    delay(300); //Need delay
+    delay(300);
     digitalWrite(MODEM_PWRKEY, LOW);
+    delay(1000); // SIM7000 // PhC
+    digitalWrite(MODEM_PWRKEY, HIGH);// PhC
 
     /*
     MODEM_FLIGHT IO:25 Modulator flight mode control,
