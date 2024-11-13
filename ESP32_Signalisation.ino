@@ -68,72 +68,18 @@
   Revision:1529B08SIM7000G utilisé pour test
 
 	to do
-  OK AlarmeMQTT si KO une fois, si pas de publish reste KO et comptage -> envoie Alarme
-  OK reponse PARAM 251caracteres trop long err MQTT, a remanier
-  KO creation entree TOPIC, chargement new Json KO?
-  OK TEMPOAUTOF si changement parametre il faut reprogrammer ALARME Auto_F
-  OK mois=
-
-  OK A tester Taquet 1 et 2
-  OK Gestion reponse à demande quand taquet fermé
-  OK RST ne marche pas
-  Reponse SMS à faire
-  OK Verif si OK reponse PARAM en MQTT
-  OK revoir message Vie
-  OK IMEI KO
-
-  bug Allume pas activé ? semble OK
-
+  FTP ne fonctionne pas?
+  
   simplifier majheure au démarrage 
   https://randomnerdtutorials.com/esp32-ntp-timezones-daylight-saving/
 
   apres OTA wifi ne redemarre pas de temps en temps ?
 
-  Version SIM7600G
-  ok upload log https://forum.arduino.cc/t/ftp-upload-sim7600/931213/2
-  ok autoupload parametre auto upload fichier log.txt en FTP
-  
-  OK softupdate par Raspi 
-  decider et tester reset modem et powerkey?
-  powerkey pulldown hard par defaut sur carte modem
-  ???ajouter dans ResetHard un +CRESET ou
-  utiliser powerkey au démarrage
 
-  05/09/2024
-  version non testée et abandon 4G -> LTE-M
-  maj compilation
-  Compilation LOLIN D32,default,80MHz, ESP32 2.0.0
-  Arduino IDE 1.8.19 : 1137293 86%, 43700 13% sur PC VScode
-
-  V3-04 19/11/2023 OK
-  ajout SMS UPLOADCOEFF upload des coeff calibration vers serveur
-  ajout COEFF=xxxx,xxxx,xxxx,xxxx rechargement des coeff si perdus
-  Extinction Wifi et BT
-  Compilation LOLIN D32,default,80MHz, ESP32 2.0.11 changer sur BOX to WPA/WPA2
-  Arduino IDE 1.8.19 : 1100345 83%, 54824 16% sur PC
-  Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
-
-  V3-03 05/11/2023 OK garde SPIFFS reste compatible existant(fichiers en SPIFFS)
-  Compilation LOLIN D32,default,80MHz, ESP32 2.0.11 changer sur BOX to WPA/WPA2
-  Arduino IDE 1.8.19 : 1098757 83%, 54824 16% sur PC
-  Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
-
-  V3-02 05/11/2023 OK pour test reste compatible existant(fichiers en SPIFFS)
-  Compilation LOLIN D32,default,80MHz, ESP32 1.0.6 V2+ Wifi not connect!
-  Arduino IDE 1.8.19 : 1081534 82%, 48776 14% sur PC
-  Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
-
-  V3-02 30/10/2023 OK pour test KO Wifi not connect!
-  Compilation LOLIN D32,default,80MHz, ESP32 2.0.11
-  Arduino IDE 1.8.19 : 1101209 84%, 54840 16% sur PC
-  Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
-
-  V3-0 10/10/2023
-  version ESP32 V2.0.11, SPIFFS, suppression EEPROM
-  focntionnelle en 2G avant passage 4G
-  Compilation LOLIN D32,default,80MHz, ESP32 2.0.11
-  Arduino IDE 1.8.19 : 1095625 83%, 54456 17% sur PC
-  Arduino IDE 1.8.19 : x 77%, x 14% sur raspi
+  13/11/2024
+  version V4-00 LTE-M
+  Compilation LOLIN D32,default,80MHz, ESP32 2.0.17
+  Arduino IDE 1.8.19 : 1113485 octets (84%), 56240 octets (17%) sur PC VScode
 
 */
 
@@ -186,8 +132,8 @@ bool    LittleFS_present = false;
 #define PinFBlc       21   // Sortie Commande Feu Blanc
 #define PinConvert    19   // Sortie Commande Convertisseur 12/24V
 #define PinFVlt       15   // Sortie Commande Feu Violet
-#define RX_PIN        17   // TX Sim7600
-#define TX_PIN        16   // RX Sim7600
+#define RX_PIN        17   // TX Sim7000
+#define TX_PIN        16   // RX Sim7000
 #define PinReset      13   // Reset Hard
 #define PinLum        34   // Mesure Luminosité
 #define PinAlimLum    25   // Alimentation LDR
@@ -277,7 +223,6 @@ TinyGsm        modem(SerialAT);
 #endif
 TinyGsmClient client(modem);
 PubSubClient  mqttClient(client);
-PhonebookEntry Phone;
 WebServer server(80);
 File UploadFile;
 
@@ -342,14 +287,11 @@ AlarmId DebutJour;         // Debut journée
 AlarmId FinJour;           // Fin de journée retour deep sleep
 AlarmId Auto_F;            // Tempo AutoF
 
-// String fieldsToPublish; // Change to allow multiple fields.
-// String dataToPublish;   // Holds your field data.
-
 //---------------------------------------------------------------------------
 void MajHeure(bool force = false);
 //---------------------------------------------------------------------------
 void setup() {
-  message.reserve(300); // texte des SMS
+  message.reserve(300); // texte des reponses
 
   Serial.begin(115200);
   Serial.println();
@@ -449,7 +391,7 @@ void setup() {
     config.cptAla        = 10; // 11*Acquisition time
     String temp          = "TPCF_CV65";
     temp.toCharArray(config.Idchar, 11);
-    String tempapn       = "eapn1.net";//"free";//"sl2sfr"
+    String tempapn       = "eapn1.net";
     String tempGprsUser  = "";
     String tempGprsPass  = "";
     config.ftpPort       = tempftpPort;
@@ -510,6 +452,7 @@ void setup() {
   OuvrirCalendrier();					// ouvre calendrier circulation en SPIFFS
   OuvrirFichierCalibration(); // ouvre fichier calibration en SPIFFS
   OuvrirLumLUT();             // ouvre le fichier lumLUT en SPIFFS
+  Ouvrir_PB();                // ouvre le fichier Phone book
   // Serial.print(F("temps =")),Serial.println(millis());
   if (gsm) {
     Serial.print(("Waiting for network..."));
@@ -709,15 +652,16 @@ void Acquisition() {
   IPAddress local = modem.localIP();
   Serial.println("; IP:" + local.toString());
   
-  static int8_t nsms;
+  // static int8_t nsms;
   static int cpt = 0; // compte le nombre de passage boucle
   static bool firstdecision = false;
   static byte cptallume = 0; // compte le nombre de passage avec Allume
 
   AIntru_HeureActuelle();
 
-  if (cpt > 5 && nsms == 0 && !firstdecision) {
-    /* une seule fois au demarrage attendre au moins 60s et plus de sms en attente */
+  if (cpt > 5 && !firstdecision) {
+  // if (cpt > 5 && nsms == 0 && !firstdecision) {
+    /* une seule fois au demarrage attendre au moins 60s */
     action_wakeup_reason(get_wakeup_reason());
     firstdecision = true;
   }
@@ -1050,19 +994,18 @@ void ReadSMS(int index){
 
   String SenderName;
   Sms smsstruct;
-  // A finir 
-    if (!modem.readSMS(&smsstruct,index)){
-      Serial.print(F("Didn't find SMS message in slot! "));
-      Serial.println(index);
-    }
-    if(! Cherche_N_PB(smsstruct.sendernumber)){
-      Serial.println(F("Appelant inconnu"));
-      EffaceSMS(index);
-      return;
-    }
-    Rmessage = smsstruct.message;
+  if (!modem.readSMS(&smsstruct,index)){
+    Serial.print(F("Didn't find SMS message in slot! "));
+    Serial.println(index);
+  }
+  if(! Cherche_N_PB(smsstruct.sendernumber)){
+    Serial.println(F("Appelant inconnu"));
     EffaceSMS(index);
-    traite_sms("SMS");
+    return;
+  }
+  Rmessage = smsstruct.message;
+  EffaceSMS(index);
+  traite_sms("SMS");
 }
 //---------------------------------------------------------------------------
 // Interpretation des messages
@@ -1125,8 +1068,8 @@ void traite_sms(String Origine) {
     ConnexionWifi(ssid, pwd, Origine);
   }
   else if (Rmessage.indexOf(F("TEL")) == 0
-          || Rmessage.indexOf(F("Tel")) == 0
-          || Rmessage.indexOf(F("tel")) == 0) { // entrer nouveau num
+        || Rmessage.indexOf(F("Tel")) == 0
+        || Rmessage.indexOf(F("tel")) == 0) { // entrer nouveau num
     byte lastPBline = last_PB(); // recupere le n° de la derniere ligne du PB
     bool newPB = false;
     bool FlagOK = true;
@@ -2460,7 +2403,7 @@ fin_tel:
       sendReply(Origine);
     }
   else if (Rmessage.indexOf(F("SENDAT")) == 0){
-    // envoie commande AT au SIM7600
+    // envoie commande AT au SIM7000
     // ex: SENDAT=AT+CCLK="23/07/19,10:00:20+04" mise à l'heure
     // attention DANGEREUX pas de verification!
     if (Rmessage.indexOf(char(61)) == 6) {
