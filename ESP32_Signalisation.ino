@@ -140,7 +140,7 @@
 #include <Arduino.h>
 
 String ver        = "V4-00";
-int    Magique    = 3;
+int    Magique    = 4;
 
 #define TINY_GSM_MODEM_SIM7000
 
@@ -2422,7 +2422,7 @@ fin_tel:
     message += "Effacement fichier log";
     sendReply(Origine);
   }
-  else if (Rmessage == "AUTOUPLOAD"){ // Auto upload log vers serveur FTP
+  else if (Rmessage.indexOf("AUTOUPLOAD") == 0){ // Auto upload log vers serveur FTP
     if (Rmessage.indexOf(char(61)) == 10) {
       byte c = Rmessage.substring(11).toInt();
       if(c==0 || c==1){
@@ -2443,7 +2443,7 @@ fin_tel:
           sauvConfig();
         }
       }
-      message += F("Cpt Ala Tracker (x15s)=");
+      message += F("Cpt Ala Tracker (x10s)=");
       message += String(config.cptAla);
       message += fl;
       sendReply(Origine);
@@ -4272,113 +4272,122 @@ void handleDateTime() {
 bool FTP_Connect(){
   char charbidon[100];
   strncpy(charbidon, "+FTPCID=1",12);
-  Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
-  
-  sprintf(charbidon,"+FTPSERV=\"%s\"", config.ftpServeur);
-  Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
-  Serial.print("FTP serveur :"), Serial.println(Sbidon);
+  // Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
+  Sbidon = modem.send_AT(charbidon);
+  // Lecture FTPSERVEUR si OK on saute parametrage suivant
+  Sbidon = modem.send_AT("+FTPSERV?");
+  // Serial.print("ftpserveur:"),Serial.println(Sbidon);
+  Sbidon = Sbidon.substring(Sbidon.indexOf("\"") + 1,Sbidon.lastIndexOf("\""));
+  Serial.print("Serveur deja parametre sur SIM7000:"),Serial.println(Sbidon);
 
-  sprintf(charbidon, "+FTPPORT=%i", config.ftpPort);
-  Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
-  Serial.print("FTP port :"), Serial.println(Sbidon);
+  if(Sbidon != String(config.ftpServeur)){ // ftpserveur not configure
+    sprintf(charbidon,"+FTPSERV=\"%s\"", config.ftpServeur);
+    // Serial.println(charbidon);
+    // Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
+    Sbidon = modem.send_AT(charbidon);
+    Serial.print("FTP serveur :"), Serial.println(Sbidon);
 
-  sprintf(charbidon, "+FTPUN=\"%s\"", config.ftpUser);
-  Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
-  Serial.print("FTP user :"), Serial.println(Sbidon);
+    sprintf(charbidon, "+FTPPORT=%i", config.ftpPort);
+    // Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
+    Sbidon = modem.send_AT(charbidon);
+    Serial.print("FTP port :"), Serial.println(Sbidon);
 
-  sprintf(charbidon, "+FTPPW=\"%s\"", config.ftpPass);
-  // modem.sendAT(String(charbidon));
-  // Sbidon = sendAT(String(charbidon),"OK","ERROR",10000);
-  Serial.print("FTP pass :"), Serial.println(modem.send_AT(String(charbidon)));
+    sprintf(charbidon, "+FTPUN=\"%s\"", config.ftpUser);
+    // Sbidon = sendAT(String(charbidon),"OK","ERROR",1000);
+    Sbidon = modem.send_AT(charbidon);
+    Serial.print("FTP user :"), Serial.println(Sbidon);
 
-  // sprintf(charbidon, "+FTPPUT=1"); // Ouverture FTP
-  // // Sbidon = sendAT(String(charbidon),"OK","ERROR",10000);
-  // modem.send_AT(String(charbidon));
-  // Serial.print("FTP Start :"), Serial.println(modem.waitResponse("OK","ERROR"));
-  // modem.waitResponse("OK","ERROR");
-  // 
-  
+    sprintf(charbidon, "+FTPPW=\"%s\"", config.ftpPass);
+    // modem.sendAT(String(charbidon));
+    // Sbidon = sendAT(String(charbidon),"OK","ERROR",10000);
+    Serial.print("FTP pass :"), Serial.println(modem.send_AT(String(charbidon)));
+  }
 
   Serial.println("A finir gestion erreur");
   return true;
 }
 //---------------------------------------------------------------------------
   bool FTP_Quit() {
-    sendAT(F("+FTPQUIT"), "OK","ERROR", 1000);
-  // if (! sendAT(F("AT+FTPQUIT"), "OK","ERROR", 10000))
-  //   return false;
-  Serial.println("A finir gestion erreur");
+    Serial.println(modem.send_AT(F("+FTPQUIT")));
+    // Serial.println("A finir gestion erreur");
   return true;
 }
 //---------------------------------------------------------------------------
 // FTP upload file
 bool FTP_upload_function (char *file2upload){
   // https://github.com/OscarVanL/SIM7000-LTE-Shield/blob/master/Code/Adafruit_FONA.cpp#L1944
+  // FTP ne marche pas si MQTT actif?
+
   Serial.print("file to upload:"),Serial.println(file2upload);
-  if(!FTP_Connect()){
+  if(strcmp(file2upload,filecalibration) == 0){ // seulement pour filecalibration pour le moment
+    if(!FTP_Connect()){
+      return false;
+    }
+    delay(1000);
+
+    // Upload du fichier
+    char charbidon[100];
+    char path[50];
+    // destination chemin et filename
+    sprintf(path,"/%s/",Id);
+    sprintf(charbidon, "+FTPPUTPATH=\"%s\"", path);
+    Serial.println(charbidon);
+    Serial.println(modem.send_AT(String(charbidon)));
+    // Serial.print("FTP put path fichier :"), Serial.println(modem.waitResponse("OK","ERROR"));
+
+    sprintf(charbidon, "+FTPPUTNAME=\"%s\"", "coeff.txt");
+    Serial.println(charbidon);
+    Serial.println(modem.send_AT(String(charbidon)));
+    // Serial.print("FTP put name fichier :"), Serial.println(modem.waitResponse("OK","ERROR"));
+
+    // Ouvrir FTP
+    int maxlength = modem.setFTPUpload();
+    if(maxlength == -1){
+      Serial.println("FTP erreur");
+      return false;
+    }
+    Serial.print("maxlength:"),Serial.println(maxlength);
+
+    // envoyer data
+    delay(500);
+    // pour test
+    int CoeffTension[4];          // Coeff calibration Tension
+    char filecalibration[11] = "/coeff.txt";    // fichier en SPIFFS contenant les data de calibration
+    if (SPIFFS.exists(filecalibration)) {
+      File f = SPIFFS.open(filecalibration, "r");
+      for (int i = 0; i < 4; i++) { //Read
+        String s = f.readStringUntil('\n');
+        CoeffTension[i] = s.toFloat();
+      }
+      f.close();
+    }
+    Serial.print(F("Coeff T Batterie = ")), Serial.print(CoeffTension[0]);
+    Serial.print(F(" Coeff T Proc = "))	  , Serial.print(CoeffTension[1]);
+    Serial.print(F(" Coeff T VUSB = "))		, Serial.print(CoeffTension[2]);
+    Serial.print(F(" Coeff T 24V = "))		, Serial.println(CoeffTension[3]);
+
+    char data[1000];
+    for(int i=0;i<4;i++){
+      strcat(data,String(CoeffTension[i]).c_str());
+      strcat(data,"\n");
+    }
+    Serial.print("data:"),Serial.println(data);
+    int length=strlen(data);
+    Serial.print("len:"),Serial.println(length);
+    if(length<=maxlength){
+      sprintf(charbidon, "+FTPPUT=2,%d",length);
+      Serial.print("ATcde:"),Serial.println(charbidon);
+      Serial.println(modem.send_AT(charbidon));
+      SerialAT.println(data);
+    }
+    // Fermer FTP
+    Serial.println(modem.send_AT("+FTPPUT=2,0"));
+
+    FTP_Quit();
+  } else {
+    Serial.println("pas supporte pour ce fichier");
     return false;
   }
-  delay(1000);
-  // FTP_Quit();
-  // return true;
-
-  // Upload du fichier
-  char charbidon[100];
-  char path[50];
-  // destination chemin et filename
-  sprintf(path,"/home/ftptpcf/%s/",config.Idchar);
-  sprintf(charbidon, "+FTPPUTPATH=\"%s\"", path);
-  Serial.println(charbidon);
-  Serial.println(modem.send_AT(String(charbidon)));
-  Serial.print("FTP put path fichier :"), Serial.println(modem.waitResponse("OK","ERROR"));
-
-  sprintf(charbidon, "+FTPPUTNAME=\"%s\"", "coeff.txt");
-  Serial.println(charbidon);
-  Serial.println(modem.send_AT(String(charbidon)));
-  Serial.print("FTP put name fichier :"), Serial.println(modem.waitResponse("OK","ERROR"));
-
-  // Ouvrir FTP
-  char data[1000] = "Bonjour depuis LTE-M";
-  Serial.println(modem.send_AT("+FTPPUT=1"));
-  Serial.print("FTP open :"), Serial.println(modem.waitResponse("+FTPPUT:","ERROR"));
-  // envoyer data
-
-
-  // Fermer FTP
-  Serial.println(modem.send_AT("+FTPPUT=2,0"));
-  Serial.print("FTP close :"), Serial.println(modem.waitResponse("+FTPPUT:","ERROR"));
-
-  uint16_t numBytes = strlen(data);
-  uint16_t remBytes = numBytes;
-
-  // while (remBytes > 0) {
-  //   if (remBytes > maxlen) sprintf(auxStr, "AT+FTPPUT=2,%i", maxlen);
-  //   else sprintf(auxStr, "AT+FTPPUT=2,%i", remBytes);
-
-  //   getReply(auxStr);
-
-  //   uint16_t sentBytes;
-  //   if (! parseReply(F("+FTPPUT: 2"), &sentBytes, ',', 1))
-  //     return false;
-
-  //   // DEBUG_PRINTLN(sentBytes); // DEBUG
-
-  //   if (! sendCheckReply(content, ok_reply, 10000))
-  //     return false;
-
-  //   remBytes = remBytes - sentBytes; // Decrement counter
-
-  //   // Check again for max length to send, repeat if needed
-  //   // readline(10000);
-  //   // DEBUG_PRINT(F("\t<--- ")); DEBUG_PRINTLN(replybuffer);
-  //   // if (! parseReply(F("+FTPPUT: 1,1"), &maxlen, ',', 1))
-  //   //   return false;
-  // }
-
-  // relecture du repertoir sur FTP pour verification presence du fichier uploadé
-  
-
-  FTP_Quit();
   return true;
 }
 //---------------------------------------------------------------------------
@@ -4807,10 +4816,10 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
   Serial.println();
 
   if(strcmp(topic,config.recvTopic[0]) == 0 && Sbidon.length() !=0){ // Serveur
-    // mqttClient.publish(config.recvTopic[0],""); // efface topic sur serveur    
+    mqttClient.publish(config.recvTopic[0],""); // efface topic sur serveur    
     traite_sms("MQTT0");
   } else if(strcmp(topic,config.recvTopic[1]) == 0  && Sbidon.length() !=0){ // User
-    // mqttClient.publish(config.recvTopic[1],""); // efface topic sur serveur
+    mqttClient.publish(config.recvTopic[1],""); // efface topic sur serveur
     traite_sms("MQTT1");
   }
 }
@@ -4849,11 +4858,11 @@ int modem_on() {
     otherwise the modulator will not reply when the command is sent
     */
     pinMode(MODEM_PWRKEY, OUTPUT);
-    digitalWrite(MODEM_PWRKEY, HIGH);
-    delay(300);
     digitalWrite(MODEM_PWRKEY, LOW);
-    delay(1000); // SIM7000 // PhC
-    digitalWrite(MODEM_PWRKEY, HIGH);// PhC
+    delay(300);
+    digitalWrite(MODEM_PWRKEY, HIGH);
+    // delay(1000); // SIM7000 // PhC
+    // digitalWrite(MODEM_PWRKEY, HIGH);// PhC
 
     /*
     MODEM_FLIGHT IO:25 Modulator flight mode control,

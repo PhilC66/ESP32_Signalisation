@@ -3,5 +3,5 @@
     "sketch": "ESP32_Signalisation.ino",
     "output": "./build",
     "defines": "USBCON",
-    "port": "COM6"
+    "port": "COM35"
 }
