@@ -200,6 +200,7 @@ bool FlagLastAlarmeMQTT      = false;
 String Memo_Demande_Feux[3]  ={"","",""};  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4,V7)
 bool FlagDemande_Feux        = false; // si demande encours = true
 bool firstdecision           = false; // true si premiere décision apres lancement
+bool flagRcvMQTT             = false; // true si reception MQTT longueur>0, false longueur = 0
 
 int CoeffTension[4];          // Coeff calibration Tension
 int CoeffTensionDefaut = 7000;// Coefficient par defaut
@@ -1011,13 +1012,13 @@ void ReadSMS(int index){
 }
 //---------------------------------------------------------------------------
 // Interpretation des messages
-// Origine = Local, BLE, SMS, MQTT0 (serveur), MQTT1 (user)
+// Origine = Local, BLE, SMS, MQTTS (serveur), MQTTU (user)
 void traite_sms(String Origine) {
   bool sms = false;
   if(Origine == "SMS") sms = true;
   
   bool smsserveur = false; // true si le sms provient du serveur
-  if (Origine == "MQTT0") smsserveur = true;
+  if (Origine == "MQTTS") smsserveur = true;
 
   /* Variables pour mode calibration */
   static int tensionmemo = 0;//	memorisation tension batterie lors de la calibration
@@ -1029,7 +1030,7 @@ void traite_sms(String Origine) {
   Serial.print("message: "), Serial.print(Rmessage),Serial.print(","),Serial.println(Rmessage.length());
 
   if (!(Rmessage.indexOf(F("TEL")) == 0 || Rmessage.indexOf(F("tel")) == 0 || Rmessage.indexOf(F("Tel")) == 0
-      || Rmessage.indexOf(F("Wifi")) == 0 || Rmessage.indexOf(F("WIFI")) == 0 || Rmessage.indexOf(F("wifi")) == 0
+      || Rmessage.indexOf(F("Wifi")) == 0
       || Rmessage.indexOf(F("MQTTDATA")) > -1 || Rmessage.indexOf(F("MQTTSERVEUR")) > -1
       || Rmessage.indexOf(F("GPRSDATA")) > -1 || Rmessage.indexOf(F("FTPDATA")) > -1 || Rmessage.indexOf(F("FTPSERVEUR")) > -1)) {
     Rmessage.toUpperCase();	// passe tout en Maj sauf si "TEL" ou "WIFI" parametres pouvant contenir minuscules
@@ -1060,6 +1061,12 @@ void traite_sms(String Origine) {
   else if (Rmessage.indexOf(F("Wifi")) == 0) { // demande connexion Wifi
     byte pos1 = Rmessage.indexOf(char(44));//","
     byte pos2 = Rmessage.indexOf(char(44), pos1 + 1);
+    if(pos1==255 || pos1<4 || pos2==255 || pos2<4){
+      // format incomplet
+      message += "erreur format";
+      sendReply(Origine);
+      return;
+    }
     String ssids = Rmessage.substring(pos1 + 1, pos2);
     String pwds  = Rmessage.substring(pos2 + 1, Rmessage.length());
     char ssid[25];
@@ -2645,13 +2652,13 @@ void generationMessage() {
 }
 //---------------------------------------------------------------------------
 // Envoyer une réponse
-// Origine = Local, BLE, SMS, MQTT0 (serveur), MQTT1 (user)
+// Origine = Local, BLE, SMS, MQTTS (serveur), MQTTU (user)
 void sendReply(String Origine) {
   if (gsm) {
-    if (Origine == "MQTT0"){ // reponse MQTT      
+    if (Origine == "MQTTS"){ // reponse MQTT      
       Envoyer_MQTT(true); // Serveur
     }
-    else if (Origine == "MQTT1"){ // reponse MQTT
+    else if (Origine == "MQTTU"){ // reponse MQTT
       Envoyer_MQTT(false); // User
     }
     else if (Origine == "SMS"){
@@ -3300,6 +3307,7 @@ void ResetHard() {
   delay(100);// imperatif
   pinMode(PinReset, OUTPUT);
   digitalWrite(PinReset, LOW);
+  delay(100);
   ESP.restart();
 }
 //---------------------------------------------------------------------------
@@ -4511,9 +4519,9 @@ void gestionTaquet(){
           if (config.AutoF)Alarm.enable(Auto_F); // armement TempoAutoF
         }
         generationMessage();
-        sendReply("MQTT0"); // envoie serveur
-        if(Memo_Demande_Feux[1] == "MQTT1"){ // reponse User
-          sendReply("MQTT1");
+        sendReply("MQTTS"); // envoie serveur
+        if(Memo_Demande_Feux[1] == "MQTTU"){ // reponse User
+          sendReply("MQTTU");
         } else if (Memo_Demande_Feux[1] == "Local"){ // reponse Local
           sendReply("Local");
         }
@@ -4751,6 +4759,10 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
       payload - Field to subscribe to. Value 0 means subscribe to all fields.
       mesLength - Message length.
   */
+  // variable stockage temporaire
+  static char temptopic[12];
+  static String tempmessage = "";
+
   Serial.print("Message arrived on topic: ");
   Serial.print(topic);
   Serial.print(" len:");
@@ -4763,17 +4775,60 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
     Serial.print((char)payload[i]);
     Sbidon += (char)payload[i];
   }
-  Rmessage = Sbidon;
   Serial.println();
 
-  if(strcmp(topic,config.recvTopic[0]) == 0 && Sbidon.length() !=0){ // Serveur
-    Serial.print("message Serveur ");
-    Serial.println(mqttClient.publish(config.recvTopic[0],"")); // efface topic sur serveur
-    traite_sms("MQTT0");
-  } else if(strcmp(topic,config.recvTopic[1]) == 0  && Sbidon.length() !=0){ // User
-    Serial.print("message User ");
-    Serial.println(mqttClient.publish(config.recvTopic[1],"")); // efface topic sur serveur    
-    traite_sms("MQTT1");
+  /* si len>0, flagRcvMQTT = true le traitement des commandes bloquantes
+    NONCIRCULE, "Wifi,SSID,PW"
+    ne seront pas executées,
+    ne le seront qu'au retour de flagRcvMQTT = false
+    garantie que le message à bien été effacé du serveur
+    cela évitera un bouclage sur ce message
+    ATTENTION
+    entre temps les variables Rmessage et Origine ne doivent pas etres altérées!
+    */
+  if(Sbidon.length() > 0){
+    flagRcvMQTT = true;
+    // sauvegarde topic et message
+    tempmessage = Sbidon;
+    // temptopic   = String(topic);
+    strcpy(temptopic,topic);
+    Rmessage    = Sbidon;
+    // on efface le topic sur le serveur
+    if(strcmp(topic,config.recvTopic[0]) == 0){ // Serveur
+      Serial.println(mqttClient.publish(config.recvTopic[0],"")); // efface topic sur serveur
+    } else if(strcmp(topic,config.recvTopic[1]) == 0){ // User
+      Serial.println(mqttClient.publish(config.recvTopic[1],"")); // efface topic sur serveur    
+    }
+    Serial.println(Rmessage);
+    if(Rmessage == F("NONCIRCULE") || Rmessage == F("noncircule") || Rmessage.indexOf(F("Wifi")) == 0){
+      // message bloquant sera traité apres retour message len=0.
+      Serial.println("message bloquant, on traite apres");
+      return;
+    } else {
+      flagRcvMQTT = false;
+      Serial.println("message non bloquant, on traite de suite");
+      // message non bloquant, on traite de suite
+      if(strcmp(temptopic,config.recvTopic[0]) == 0){ // Serveur
+        Serial.println("message from serveur");
+        traite_sms("MQTTS");
+      } else if(strcmp(temptopic,config.recvTopic[1]) == 0){ // User
+        Serial.println("message from user");
+        traite_sms("MQTTU");
+      }
+    }
+  } else if(Sbidon.length() == 0){
+    Serial.println("len = 0");
+    if (flagRcvMQTT){
+      flagRcvMQTT = false;
+      Rmessage = tempmessage;
+      // on traite maintenant
+      Serial.println("on traite maintenant");
+      if(strcmp(temptopic,config.recvTopic[0]) == 0){ // Serveur
+        traite_sms("MQTTS");
+      } else if(strcmp(temptopic,config.recvTopic[1]) == 0){ // User
+        traite_sms("MQTTU");
+      }
+    }
   }
 }
 //---------------------------------------------------------------------------
