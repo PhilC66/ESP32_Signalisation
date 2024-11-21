@@ -69,6 +69,7 @@
 
 	to do
   FTP ne fonctionne pas?
+  OK Ajouter tension 24V si Allume dans message SYS
   
   simplifier majheure au démarrage 
   https://randomnerdtutorials.com/esp32-ntp-timezones-daylight-saving/
@@ -76,10 +77,10 @@
   apres OTA wifi ne redemarre pas de temps en temps ?
 
 
-  13/11/2024
+  19/11/2024
   version V4-00 LTE-M
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.17
-  Arduino IDE 1.8.19 : 1113485 octets (84%), 56240 octets (17%) sur PC VScode
+  Arduino IDE 1.8.19 : 1113649 octets (84%), 56208 octets (17%) sur PC VScode
 
 */
 
@@ -196,8 +197,9 @@ bool FlagLastAlarmeGprs      = false;
 bool FlagAlarmeMQTT          = false;
 bool AlarmeMQTT              = false;
 bool FlagLastAlarmeMQTT      = false;
-String Memo_Demande_Feux[3] ={"","",""};  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4,V7)
-bool FlagDemande_Feux       = false;   // si demande encours = true
+String Memo_Demande_Feux[3]  ={"","",""};  // 0 num demandeur,1 nom, 2 feux demandé (O2,M3,S4,V7)
+bool FlagDemande_Feux        = false; // si demande encours = true
+bool firstdecision           = false; // true si premiere décision apres lancement
 
 int CoeffTension[4];          // Coeff calibration Tension
 int CoeffTensionDefaut = 7000;// Coefficient par defaut
@@ -654,7 +656,7 @@ void Acquisition() {
   
   // static int8_t nsms;
   static int cpt = 0; // compte le nombre de passage boucle
-  static bool firstdecision = false;
+  
   static byte cptallume = 0; // compte le nombre de passage avec Allume
 
   AIntru_HeureActuelle();
@@ -1032,8 +1034,8 @@ void traite_sms(String Origine) {
       || Rmessage.indexOf(F("GPRSDATA")) > -1 || Rmessage.indexOf(F("FTPDATA")) > -1 || Rmessage.indexOf(F("FTPSERVEUR")) > -1)) {
     Rmessage.toUpperCase();	// passe tout en Maj sauf si "TEL" ou "WIFI" parametres pouvant contenir minuscules
     // Rmessage.trim();
+    Rmessage.replace(" ", "");// supp tous les espaces
   }
-  Rmessage.replace(" ", "");// supp tous les espaces
 
   messageId();
   if (Rmessage.indexOf(F("TIMEOUTWIFI")) > -1) { // Parametre Arret Wifi
@@ -1177,8 +1179,6 @@ fin_tel:
       message += F("Batt GSM : ");
       message += String(modem.getBattVoltage());
       message += F(" mV, ");
-      // message += Batp;
-      // message += F(" %");
       message += fl;
     }
     message += F("Ver: ");
@@ -1195,6 +1195,12 @@ fin_tel:
     message += (float(VUSB / 1000.0));
     message += "V";
     message += fl;
+    if(Allume){
+      message += F("V 24= ");
+      message += String(float(Tension24 / 100.0));
+      message += "V";
+      message += fl;
+    }
     sendReply(Origine);
   }
   else if (Rmessage.indexOf(F("ID=")) == 0) {			//	Id= nouvel Id
@@ -1561,9 +1567,7 @@ fin_tel:
     message += fl;
     sendReply(Origine);
     if (ok) {
-      // if (sms)EffaceSMS(slot);
       SignalVie();
-      // action_wakeup_reason(4);
     }
   }
   else if (Rmessage == F("NONCIRCULE")) {
@@ -1582,10 +1586,9 @@ fin_tel:
     }
     message += fl;
     sendReply(Origine);
-    if (ok) {
-      // if (sms){
-      //   EffaceSMS(slot);
-      // }
+    if (ok && firstdecision) {
+      // Seulement si déjà lancé apres première décision
+      // sinon au lancement, on attend première décision
       Extinction();
       action_wakeup_reason(4);
     }
@@ -2665,23 +2668,25 @@ void sendReply(String Origine) {
 // Envoyer message en MQTT
 // destinataire = true Serveur, false à User
 void Envoyer_MQTT(bool dest){
-  Serial.print(F("send mqtt "));
+  Serial.println("Sending MQTT len:");
+  Serial.println(message.length());
+  Serial.print(F("to:"));
   Serial.print(dest ? config.sendTopic[0] : config.sendTopic[1]);
-  // Serial.println(message);
+  Serial.print(F(":"));
   if(dest){ // message Serveur
     if (mqttClient.publish(config.sendTopic[0], message.c_str()), true){ // Serveur
       AlarmeMQTT = false;
-      Serial.println(F(" OK"));
+      Serial.println(F("OK"));
     } else {
-      Serial.println(F(" KO"));
+      Serial.println(F("KO"));
       AlarmeMQTT = true;
     }
   } else { // message user
     if(mqttClient.publish(config.sendTopic[1], message.c_str()), true){ // User
       AlarmeMQTT = false;
-      Serial.println(F(" OK"));
+      Serial.println(F("OK"));
     } else {
-      Serial.println(F(" KO"));
+      Serial.println(F("KO"));
       AlarmeMQTT = true;
     }
   }
@@ -3284,15 +3289,18 @@ void WifiOff() {
   WiFi.mode(WIFI_OFF);
   WiFi.mode(WIFI_MODE_NULL);
   btStop();
-  Alarm.delay(100);
+  delay(100);// imperatif
   ResetHard();
 } 
 //---------------------------------------------------------------------------
 // Reset hard de ESP32
 void ResetHard() {
   // GPIO13 to RS reset hard
+  Serial.println("Reset Hard");
+  delay(100);// imperatif
   pinMode(PinReset, OUTPUT);
   digitalWrite(PinReset, LOW);
+  ESP.restart();
 }
 //---------------------------------------------------------------------------
 // calcul moyenne 10 mesures consécutives
@@ -4759,10 +4767,12 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
   Serial.println();
 
   if(strcmp(topic,config.recvTopic[0]) == 0 && Sbidon.length() !=0){ // Serveur
-    mqttClient.publish(config.recvTopic[0],""); // efface topic sur serveur    
+    Serial.print("message Serveur ");
+    Serial.println(mqttClient.publish(config.recvTopic[0],"")); // efface topic sur serveur
     traite_sms("MQTT0");
   } else if(strcmp(topic,config.recvTopic[1]) == 0  && Sbidon.length() !=0){ // User
-    mqttClient.publish(config.recvTopic[1],""); // efface topic sur serveur
+    Serial.print("message User ");
+    Serial.println(mqttClient.publish(config.recvTopic[1],"")); // efface topic sur serveur    
     traite_sms("MQTT1");
   }
 }
