@@ -77,10 +77,10 @@
   apres OTA wifi ne redemarre pas de temps en temps ?
 
 
-  19/11/2024
+  22/11/2024
   version V4-00 LTE-M
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.17
-  Arduino IDE 1.8.19 : 1113649 octets (84%), 56208 octets (17%) sur PC VScode
+  Arduino IDE 1.8.19 : 1112389 octets (84%), 56240 octets (17%) sur PC VScode
 
 */
 
@@ -655,7 +655,6 @@ void Acquisition() {
   IPAddress local = modem.localIP();
   Serial.println("; IP:" + local.toString());
   
-  // static int8_t nsms;
   static int cpt = 0; // compte le nombre de passage boucle
   
   static byte cptallume = 0; // compte le nombre de passage avec Allume
@@ -663,7 +662,6 @@ void Acquisition() {
   AIntru_HeureActuelle();
 
   if (cpt > 5 && !firstdecision) {
-  // if (cpt > 5 && nsms == 0 && !firstdecision) {
     /* une seule fois au demarrage attendre au moins 60s */
     action_wakeup_reason(get_wakeup_reason());
     firstdecision = true;
@@ -995,7 +993,6 @@ void ReadSMS(int index){
   // effacer SMS
   // et envoyer traite_sms("SMS")
 
-  String SenderName;
   Sms smsstruct;
   if (!modem.readSMS(&smsstruct,index)){
     Serial.print(F("Didn't find SMS message in slot! "));
@@ -1021,10 +1018,10 @@ void traite_sms(String Origine) {
   if (Origine == "MQTTS") smsserveur = true;
 
   /* Variables pour mode calibration */
-  static int tensionmemo = 0;//	memorisation tension batterie lors de la calibration
-  int coef = 0; // coeff temporaire
-  static byte P = 0; // Pin entrée a utiliser pour calibration
-  static byte M = 0; // Mode calibration 1,2,3,4
+  static int tensionmemo = 0;           //	memorisation tension batterie lors de la calibration
+  int coef = 0;                         // coeff temporaire
+  static byte P = 0;                    // Pin entrée a utiliser pour calibration
+  static byte M = 0;                    // Mode calibration 1,2,3,4
   static bool FlagCalibration = false;	// Calibration Tension en cours
 
   Serial.print("message: "), Serial.print(Rmessage),Serial.print(","),Serial.println(Rmessage.length());
@@ -1033,8 +1030,7 @@ void traite_sms(String Origine) {
       || Rmessage.indexOf(F("Wifi")) == 0
       || Rmessage.indexOf(F("MQTTDATA")) > -1 || Rmessage.indexOf(F("MQTTSERVEUR")) > -1
       || Rmessage.indexOf(F("GPRSDATA")) > -1 || Rmessage.indexOf(F("FTPDATA")) > -1 || Rmessage.indexOf(F("FTPSERVEUR")) > -1)) {
-    Rmessage.toUpperCase();	// passe tout en Maj sauf si "TEL" ou "WIFI" parametres pouvant contenir minuscules
-    // Rmessage.trim();
+    Rmessage.toUpperCase();	// passe tout en Maj sauf si "TEL" ou "WIFI"... parametres pouvant contenir minuscules
     Rmessage.replace(" ", "");// supp tous les espaces
   }
 
@@ -1107,7 +1103,7 @@ void traite_sms(String Origine) {
           }
         }
         Save_PB();
-        message += "ligne efface";
+        message += "ligne effacee";
         goto fin_tel;
       }
     }
@@ -1138,7 +1134,6 @@ fin_tel:
     }
     else {
       if (!efface) {
-        bool ok = false;
         String bidon = newnumero + ";" + newnom;
         if(newPB){ // Nouvelle ligne
           strcpy(PB_list[lastPBline + 1] , bidon.c_str());
@@ -1219,7 +1214,6 @@ fin_tel:
       mqttClient.disconnect();
 
       copie_Topic(); // Nouvel Id dans Topic
-
       sauvConfig();														// sauvegarde config
 
       mqttConnect();
@@ -1234,7 +1228,7 @@ fin_tel:
     sendReply(Origine);
   }
   else if (Rmessage.indexOf(F("LOG")) == 0) {	// demande taille du log
-    File f = SPIFFS.open(filelog, "r"); // taille du fichier log en SPIFFS
+    File f = SPIFFS.open(filelog, "r");       // taille du fichier log en SPIFFS
     message = F("local log size :");
     message += String(f.size()) + fl;
     f.close();
@@ -1279,20 +1273,6 @@ fin_tel:
     sendReply(Origine);
   }
   else if (Rmessage.indexOf(F("MAJHEURE")) == 0) {	//	forcer mise a l'heure
-    // if (sms) {
-    //   String mytime = smsstruct.timestamp.substring(0, 20);
-    //   // Serial.print(F("heure du sms:")),Serial.println(mytime);
-    //   // String _temp = F("AT+CCLK=\"");
-    //   String _temp = F("+CCLK=\"");
-    //   _temp += mytime + "\"\r\n";
-    //   // Serial.print(_temp);
-    //   modem.send_AT(_temp);
-    //   Alarm.delay(100);
-    //   MajHeure(true);			// mise a l'heure forcée
-    // }
-    // else {
-    //   message += F("pas de mise à l'heure en local");
-    // }
     MajHeure(true);			// mise a l'heure forcée
     messageId();
     message += "Mise à l'heure NTP";
@@ -1303,12 +1283,12 @@ fin_tel:
     message += modem.getIMEI();
     sendReply(Origine);
   }
-  else if (Rmessage.indexOf(F("FIN")) == 0) {			//	Heure Fin de journée
+  else if (Rmessage.indexOf(F("FIN")) == 0) {			  //	Heure Fin de journée
     if ((Rmessage.indexOf(char(61))) == 3) {
       long i = atol(Rmessage.substring(4).c_str()); //	Heure
       if (i > 0 && i <= 86340) {										//	ok si entre 0 et 86340(23h59)
         config.FinJour = i;
-        sauvConfig();															// sauvegarde config
+        sauvConfig();															  // sauvegarde config
         Alarm.disable(FinJour);
         Alarm.write(FinJour,config.FinJour);
         // FinJour = Alarm.alarmRepeat(config.FinJour, FinJournee);// init tempo
@@ -1427,13 +1407,7 @@ fin_tel:
         else {
           flag = false;
         }
-        // Serial.printf("%s%d,%s%d\n","p1=",p1,"flag=",flag);
       }
-      // Serial.print("flag="),Serial.println(flag);
-      // }
-      // else {
-      // flag = false;
-      // }
       if (flag) { // format ok
         p1 = 0;
         byte p2 = 0;
@@ -1479,7 +1453,7 @@ fin_tel:
     /* mise a jour calendrier ;format : MOIS=mm,31 fois 0/1
       demande calendrier pour un mois donné ; format : MOIS=mm? */
     bool flag = true; // validation du format
-    bool W = true; // true Write, false Read
+    bool W = true;    // true Write, false Read
     int m = 0;
     if (Rmessage.indexOf("{") == 0) { // json
       JsonDocument doc;
@@ -1602,10 +1576,10 @@ fin_tel:
   }
   else if (Rmessage.indexOf(F("TEMPOWAKEUP")) == 0) { // Tempo wake up
     if ((Rmessage.indexOf(char(61))) == 11) {
-      int i = Rmessage.substring(12).toInt(); //	durée
-      if (i > 59 && i <= 36000) { // 1mn à 10H
+      int i = Rmessage.substring(12).toInt();         //	durée
+      if (i > 59 && i <= 36000) {                     // 1mn à 10H
         config.RepeatWakeUp = i;
-        sauvConfig();															// sauvegarde config
+        sauvConfig();															    // sauvegarde config
       }
     }
     message += F("Tempo repetition Wake up (s)=");
@@ -1674,7 +1648,6 @@ fin_tel:
 
       coef = CoeffTensionDefaut;
       tension = map(adc_mm[M-1] / nSample, 0, 4095, 0, coef);
-      // tension = map(moyenneAnalogique(P), 0, 4095, 0, coef);
       // Serial.print("TensionBatterie = "),Serial.println(TensionBatterie);
       tensionmemo = tension;
     }
@@ -2018,22 +1991,23 @@ fin_tel:
     sendReply(Origine);
   }
   else if (gsm && Rmessage.indexOf(F("UPLOADLOG")) == 0) {//upload log sur demande
-    message += F("lancement upload log");
-    message += fl;
-    MajLog(Origine, "upload log");// renseigne log
-    Serial.println(F("Starting..."));
-    bool reply = FTP_upload_function(filelog); // Upload fichier
-    Serial.println("The end... Response: " + String(reply));
+    message += "Fonction non active";
+    // message += F("lancement upload log");
+    // message += fl;
+    // MajLog(Origine, "upload log");// renseigne log
+    // Serial.println(F("Starting..."));
+    // bool reply = FTP_upload_function(filelog); // Upload fichier
+    // Serial.println("The end... Response: " + String(reply));
 
-    if(reply == true){
-      message += F("upload OK");
-      SPIFFS.remove(filelog);  // efface fichier log
-      MajLog(Origine, "");         // nouveau log
-      MajLog(Origine, F("upload OK"));// renseigne nouveau log
-    } else {
-      message += F("upload fail");
-      MajLog(Origine, F("upload fail"));// renseigne log
-    }
+    // if(reply == true){
+    //   message += F("upload OK");
+    //   SPIFFS.remove(filelog);          // efface fichier log
+    //   MajLog(Origine, "");             // nouveau log
+    //   MajLog(Origine, F("upload OK")); // renseigne nouveau log
+    // } else {
+    //   message += F("upload fail");
+    //   MajLog(Origine, F("upload fail"));// renseigne log
+    // }
     sendReply(Origine);
   }
   else if (gsm && Rmessage.indexOf(F("COEFF")) == 0) {//Lecture/ecriture des coeff
@@ -2070,20 +2044,21 @@ fin_tel:
     sendReply(Origine);
   }
   else if (gsm && Rmessage.indexOf(F("UPLOADCOEFF")) == 0) {//upload des coeff
-    message += F("lancement upload Coeff");
-    message += fl;
-    MajLog(Origine, "upload coeff");// renseigne log
-    Serial.println(F("Starting..."));
-    bool reply = FTP_upload_function(filecalibration); // Upload fichier
-    Serial.println("The end... Response: " + String(reply));
+    message += "Fonction non active";
+    // message += F("lancement upload Coeff");
+    // message += fl;
+    // MajLog(Origine, "upload coeff");// renseigne log
+    // Serial.println(F("Starting..."));
+    // bool reply = FTP_upload_function(filecalibration); // Upload fichier
+    // Serial.println("The end... Response: " + String(reply));
 
-    if(reply == true){
-      message += F("upload OK");
-      MajLog(Origine, F("upload Coeff OK"));// renseigne nouveau log
-    } else {
-      message += F("upload fail");
-      MajLog(Origine, F("upload Coeff fail"));// renseigne log
-    }
+    // if(reply == true){
+    //   message += F("upload OK");
+    //   MajLog(Origine, F("upload Coeff OK"));// renseigne nouveau log
+    // } else {
+    //   message += F("upload fail");
+    //   MajLog(Origine, F("upload Coeff fail"));// renseigne log
+    // }
     sendReply(Origine);
   }
   else if (Rmessage.indexOf("FTPDATA") > -1) {
@@ -2376,17 +2351,17 @@ fin_tel:
     sendReply(Origine);
   }
   else if (Rmessage.indexOf("AUTOUPLOAD") == 0){ // Auto upload log vers serveur FTP
-    if (Rmessage.indexOf(char(61)) == 10) {
-      byte c = Rmessage.substring(11).toInt();
-      if(c==0 || c==1){
-        config.autoupload = c;
-        sauvConfig();
-      }
-    }
-    message += "Autoupload:";
-    message += String(config.autoupload);
+    message += "Fonction non active";
+    // if (Rmessage.indexOf(char(61)) == 10) {
+    //   byte c = Rmessage.substring(11).toInt();
+    //   if(c==0 || c==1){
+    //     config.autoupload = c;
+    //     sauvConfig();
+    //   }
+    // }
+    // message += "Autoupload:";
+    // message += String(config.autoupload);
     sendReply(Origine);
-    
   }
   else if (Rmessage.indexOf(F("CPTALATRCK")) == 0 || Rmessage.indexOf(F("CPTALA")) == 0) { // Compteur Ala avant Flag
       if (Rmessage.indexOf(char(61)) == 10) {
@@ -2512,8 +2487,6 @@ void envoie_alarme() {
 }
 //---------------------------------------------------------------------------
 void envoieGroupeMessage(bool vie, bool Serveur) {
-  /* 
-   */
   generationMessage();
   if(vie){
     // message += F("Reset modem : ");
@@ -2981,17 +2954,17 @@ void MajLog(String Id, String Raison) {
       /* si trop grand on efface */
       FileLogOnce = true;
       messageId();
-      message += F("Fichier log presque plein\n");
+      message += F("KO Fichier log presque plein\n");
       message += String(f.size());
       message += F("\nFichier sera efface a 300000");
       if (gsm) {
-        Envoyer_MQTT(false); // message U
-        Envoyer_MQTT(true);  // message S
+        sendReply("MQTTU"); // message U
+        sendReply("MQTTS"); // message S
       }
     }
     else if (f.size() > 300000 && FileLogOnce) { // 292Ko 75000 lignes
       messageId();
-      message += F("Fichier log plein\n");
+      message += F("KO Fichier log plein\n");
       message += String(f.size());
       if(config.autoupload){
         message += F("\nFichier upload vers serveur ");
@@ -3004,8 +2977,8 @@ void MajLog(String Id, String Raison) {
         message += F("\nFichier efface");
       }
       if (gsm) {
-        Envoyer_MQTT(false); // message U
-        Envoyer_MQTT(true);  // message S
+        sendReply("MQTTU"); // message U
+        sendReply("MQTTS"); // message S
       }
       f.close();
       SPIFFS.remove(filelog);
@@ -3296,7 +3269,7 @@ void WifiOff() {
   WiFi.mode(WIFI_OFF);
   WiFi.mode(WIFI_MODE_NULL);
   btStop();
-  delay(100);// imperatif
+  delay(1000);// imperatif
   ResetHard();
 } 
 //---------------------------------------------------------------------------
@@ -3307,6 +3280,7 @@ void ResetHard() {
   delay(100);// imperatif
   pinMode(PinReset, OUTPUT);
   digitalWrite(PinReset, LOW);
+  // normalement on n'arrive jamais là
   delay(100);
   ESP.restart();
 }
@@ -4261,7 +4235,6 @@ bool FTP_Connect(){
     // Sbidon = sendAT(String(charbidon),"OK","ERROR",10000);
     Serial.print("FTP pass :"), Serial.println(modem.send_AT(String(charbidon)));
   }
-
   Serial.println("A finir gestion erreur");
   return true;
 }
@@ -4588,7 +4561,7 @@ void ConnectGPRS(){
   }
 }
 //---------------------------------------------------------------------------
-// Connexion MQTT
+// Connexion MQTT, Clean session false
 void mqttConnect() {
   if (modem.isGprsConnected()) {
     // Connect to the MQTT broker.
@@ -4606,7 +4579,7 @@ void mqttConnect() {
   }
 }
 //---------------------------------------------------------------------------
-// Subscription MQTT
+// Subscription MQTT, qos=1
 bool mqttSubscribe(bool unsubSub) {
   byte rep = 1;
   // unsubSub = 0 subscribe, = 1 unsubscribe
@@ -4777,7 +4750,7 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
   }
   Serial.println();
 
-  /* si len>0, flagRcvMQTT = true le traitement des commandes bloquantes
+  /* si len>0, flagRcvMQTT = true, le traitement des commandes bloquantes
     NONCIRCULE, "Wifi,SSID,PW"
     ne seront pas executées,
     ne le seront qu'au retour de flagRcvMQTT = false
@@ -4800,7 +4773,9 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
       Serial.println(mqttClient.publish(config.recvTopic[1],"")); // efface topic sur serveur    
     }
     Serial.println(Rmessage);
-    if(Rmessage == F("NONCIRCULE") || Rmessage == F("noncircule") || Rmessage.indexOf(F("Wifi")) == 0){
+    if(Rmessage == F("NONCIRCULE") || Rmessage == F("noncircule") ||
+      Rmessage.indexOf(F("Wifi")) == 0 || Rmessage.indexOf(F("WIFIOFF")) == 0 
+      || Rmessage.indexOf(F("wifioff")) == 0){
       // message bloquant sera traité apres retour message len=0.
       Serial.println("message bloquant, on traite apres");
       return;
@@ -4869,8 +4844,6 @@ int modem_on() {
     digitalWrite(MODEM_PWRKEY, LOW);
     delay(300);
     digitalWrite(MODEM_PWRKEY, HIGH);
-    // delay(1000); // SIM7000 // PhC
-    // digitalWrite(MODEM_PWRKEY, HIGH);// PhC
 
     /*
     MODEM_FLIGHT IO:25 Modulator flight mode control,
@@ -4900,7 +4873,7 @@ int modem_on() {
   return i;
 }
 //---------------------------------------------------------------------------
-// retourne n° derniere ligne PB
+// retourne n° derniere ligne PhoneBook
 byte last_PB(){
   Read_PB();
   byte dernier = 0;
