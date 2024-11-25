@@ -69,7 +69,6 @@
 
 	to do
   FTP ne fonctionne pas?
-  OK Ajouter tension 24V si Allume dans message SYS
   
   simplifier majheure au démarrage 
   https://randomnerdtutorials.com/esp32-ntp-timezones-daylight-saving/
@@ -77,18 +76,19 @@
   apres OTA wifi ne redemarre pas de temps en temps ?
 
 
-  22/11/2024
+  23/11/2024
   version V4-00 LTE-M
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.17
-  Arduino IDE 1.8.19 : 1112389 octets (84%), 56240 octets (17%) sur PC VScode
+  Arduino IDE 1.8.19 : 1112109 octets (84%), 56240 octets (17%) sur PC VScode
 
 */
 
 #include <Arduino.h>
 
-String ver        = "V4-00";
-int    Magique    = 4;
+String ver        = "V4-01";
+int    Magique    = 5;
 
+#define Exploitation // si defini pour Exploitation, sinon Test
 #define TINY_GSM_MODEM_SIM7000
 
 #include <Battpct.h>
@@ -683,8 +683,8 @@ void Acquisition() {
   Tension24       = map(adc_mm[3] / nSample, 0, 4095, 0, CoeffTension[3]);
   Lum             = map(adc_mm[4] / nSample, 0 , 4095, 100, 0); // Luminosité 0-100%
 
-  Serial.print("luminosité = "), Serial.print(Lum);
-  Serial.print(" lumlut = "), Serial.println(lumlut(Lum));
+  // Serial.print("luminosité = "), Serial.print(Lum);
+  // Serial.print(" lumlut = "), Serial.println(lumlut(Lum));
 
   // en cas de feux fixe rafraichissement commande en fonction lum
   // les feux M et S sont automatiquement ajusté par blink
@@ -4364,9 +4364,9 @@ void VerifCdeFBlc(){
     if(millis()- tmesure > periodemesures){// periode mesure > periodemesures
       if(compteurmesureres > 25){// >1200
         // pour eviter fausses alarmes quand proc occupé par ailleurs
-        Serial.print("Cpt Cde FBLc:"),Serial.print(compteurmesureres);
-        Serial.print(", accu:"),Serial.print(accumesureres);
-        Serial.print(", %:"),Serial.println((float)accumesureres/compteurmesureres);
+        // Serial.print("Cpt Cde FBLc:"),Serial.print(compteurmesureres);
+        // Serial.print(", accu:"),Serial.print(accumesureres);
+        // Serial.print(", %:"),Serial.println((float)accumesureres/compteurmesureres);
         if((float)accumesureres/compteurmesureres < .25 ){// .35, .5 = M, .75 = S
           Serial.println("Alarme Cde Feu Blanc");
           FlagAlarmeCdeFBlc = true;
