@@ -79,13 +79,14 @@
   23/11/2024
   version V4-00 LTE-M
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.17
-  Arduino IDE 1.8.19 : 1112109 octets (84%), 56240 octets (17%) sur PC VScode
+  Arduino IDE 1.8.19 : 1112177 octets (84%), 56240 octets (17%) sur PC VScode
+  Arduino IDE 1.8.19 : 1112257 octets (84%), 56240 octets (17%) sur Pi Mobile
 
 */
 
 #include <Arduino.h>
 
-String ver        = "V4-01";
+String ver        = "V4-02";
 int    Magique    = 5;
 
 #define Exploitation // si defini pour Exploitation, sinon Test
@@ -95,7 +96,7 @@ int    Magique    = 5;
 #include "defs.h"
 #include <TinyGsmClient.h>         // librairie TinyGSM revue PhC 0.12.0
 #include <PubSubClient.h>
-#include <Time.h>
+// #include <Time.h>
 #include <TimeAlarms.h>
 #include <WiFi.h>
 #include <SPIFFS.h>
@@ -639,6 +640,7 @@ void Acquisition() {
     Serial.print(F("Cnx reseau  (1)  :")),Serial.println(modem.isNetworkConnected());
     Serial.print(F("Reg  status (1/5):")),Serial.println(modem.getRegistrationStatus());
     Serial.print(F("Cnx GPRS    (1)  :")),Serial.println(modem.isGprsConnected());
+    Serial.print(F("cptRegStatusFault:")),Serial.println(cptRegStatusFault);
     // Patch Blocage modem
     if(modem.getRegistrationStatus() != 1 && modem.getRegistrationStatus() != 5){
       if(cptRegStatusFault ++ > config.cptAla){
@@ -648,6 +650,8 @@ void Acquisition() {
         modem.send_AT(F("+CFUN=1,1"));
         delay(10000);
       }
+    } else {
+      cptRegStatusFault = 0;// reset compteur
     }
   }
 
