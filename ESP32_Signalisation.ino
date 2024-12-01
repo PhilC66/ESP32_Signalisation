@@ -79,7 +79,7 @@
   23/11/2024
   version V4-00 LTE-M
   Compilation LOLIN D32,default,80MHz, ESP32 2.0.17
-  Arduino IDE 1.8.19 : 1112177 octets (84%), 56240 octets (17%) sur PC VScode
+  Arduino IDE 1.8.19 : 1111793 octets (84%), 56240 octets (17%) sur PC VScode
   Arduino IDE 1.8.19 : 1112257 octets (84%), 56240 octets (17%) sur Pi Mobile
 
 */
@@ -96,7 +96,7 @@ int    Magique    = 5;
 #include "defs.h"
 #include <TinyGsmClient.h>         // librairie TinyGSM revue PhC 0.12.0
 #include <PubSubClient.h>
-// #include <Time.h>
+//#include <Time.h>
 #include <TimeAlarms.h>
 #include <WiFi.h>
 #include <SPIFFS.h>
@@ -547,7 +547,7 @@ void setup() {
 }
 //---------------------------------------------------------------------------
 void loop() {
-  static unsigned int t0 = millis();
+  static unsigned int timer0 = millis();
   bool first = true;
   recvOneChar(); // Capture reception liaison serie locale
 
@@ -569,12 +569,12 @@ void loop() {
         AlarmeGprs = false;
       }
     }
-    if (!mqttClient.connected() && ((millis()- t0) > 5000 || first)){
+    if (!mqttClient.connected() && ((millis()- timer0) > 5000 || first)){
       mqttConnect(); // Connect if MQTT client is not connected.
       if (mqttSubscribe(0) == true ) {
         Serial.println("Subscribed");
       }
-      t0 = millis();
+      timer0 = millis();
       first = false;
     }
     mqttClient.loop(); // Call the loop to maintain connection to the server.
@@ -1551,7 +1551,9 @@ fin_tel:
     }
     message += fl;
     sendReply(Origine);
-    if (ok) {
+    // necessaire pour jour non circulé sur reception circule on lance FCV
+    // si reception CIRCULE on ne lance pas FCV avant firstdecision 
+    if (ok && firstdecision) {
       SignalVie();
     }
   }
@@ -3465,8 +3467,8 @@ void action_wakeup_reason(byte wr) {
         break;
       }
       if ((calendrier[month()][day()] ^ flagCircule) && jour) { // jour circulé & jour
-        // Sbidon = F("Jour circule ou demande circulation");
-        // Serial.println(Sbidon);
+        Sbidon = F("Jour circule ou demande circulation");
+        Serial.println(Sbidon);
         // MajLog(F("Auto"), Sbidon);
         // Feux = 1;
         // Allumage(); // Violet 1, Blanc 0
@@ -4777,15 +4779,13 @@ void mqttSubscriptionCallback( char* topic, byte* payload, unsigned int mesLengt
       Serial.println(mqttClient.publish(config.recvTopic[1],"")); // efface topic sur serveur    
     }
     Serial.println(Rmessage);
-    if(Rmessage == F("NONCIRCULE") || Rmessage == F("noncircule") ||
-      Rmessage.indexOf(F("Wifi")) == 0 || Rmessage.indexOf(F("WIFIOFF")) == 0 
-      || Rmessage.indexOf(F("wifioff")) == 0){
+    if(flagRcvMQTT){
       // message bloquant sera traité apres retour message len=0.
-      Serial.println("message bloquant, on traite apres");
+      Serial.println("message sera traite apres reception message len=0");
       return;
     } else {
       flagRcvMQTT = false;
-      Serial.println("message non bloquant, on traite de suite");
+      Serial.println("message traite maintenant");
       // message non bloquant, on traite de suite
       if(strcmp(temptopic,config.recvTopic[0]) == 0){ // Serveur
         Serial.println("message from serveur");
