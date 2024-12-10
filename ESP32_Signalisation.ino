@@ -563,7 +563,7 @@ void loop() {
           lastReconnectGPRSAttempt = millis();
           AlarmeGprs = true;
         }
-      } else {lastReconnectGPRSAttempt = 0;}
+      } else {lastReconnectGPRSAttempt = millis();}// =0 est une erreur
       if (modem.isGprsConnected()) {
         Serial.println(F(" GPRS reconnected"));
         AlarmeGprs = false;
@@ -637,9 +637,9 @@ void Acquisition() {
 
   if(gsm){
     static int cptRegStatusFault = 0;
-    Serial.print(F("Cnx reseau  (1)  :")),Serial.println(modem.isNetworkConnected());
-    Serial.print(F("Reg  status (1/5):")),Serial.println(modem.getRegistrationStatus());
-    Serial.print(F("Cnx GPRS    (1)  :")),Serial.println(modem.isGprsConnected());
+    Serial.print(F("Cnx reseau  (1)  :")),Serial.println(modem.isNetworkConnected());    // CEREG, CGREG
+    Serial.print(F("Reg  status (1/5):")),Serial.println(modem.getRegistrationStatus()); // CEREG, CGREG
+    Serial.print(F("Cnx GPRS    (1)  :")),Serial.println(modem.isGprsConnected());       // CGDCONT
     Serial.print(F("cptRegStatusFault:")),Serial.println(cptRegStatusFault);
     // Patch Blocage modem
     if(modem.getRegistrationStatus() != 1 && modem.getRegistrationStatus() != 5){
